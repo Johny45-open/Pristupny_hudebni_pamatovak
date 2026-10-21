@@ -1,4 +1,4 @@
-"""Přístupné nastavení hry (PyQt6).
+"""Přístupné nastavení hry a hlasového výstupu (PyQt6).
 
 Každé pole má český popisek propojený přes ``setBuddy``, přístupný
 název a popis. Nastavení se validuje a vrací jako složka hodnot.
@@ -12,26 +12,37 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
 )
 
 import melodies
+import notify
 import theory
 
 
 class NastaveniDialog(QDialog):
-    """Dialog nastavení hry — tónina, októva, pokusy, délka, interval, melodie."""
+    """Dialog nastavení hry — tónina, októva, pokusy, délka, interval, melodie,
+    hlasový výstup."""
 
-    def __init__(self, nastaveni, parent=None) -> None:
+    def __init__(self, nastaveni, parent=None, *,
+                 nastaveni_hlasu=None,
+                 oznamovac=None,
+                 prehravac=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Nastavení hry")
         self.setModal(True)
         self.setAccessibleDescription(
             "Nastavení tóniny, oktávy, pokusů, délky sekvence, "
-            "intervalu statistik a melodií.")
+            "intervalu statistik, melodií a hlasového výstupu.")
         self._nastaveni = nastaveni   # kopie pro čtení výchozích hodnot
+        self._oznamovac = oznamovac           # pro stav a zkušební hlášku
+        self._prehravac = prehravac           # (melodie, tonina) -> bool
+        self._nastaveni_hlasu = (nastaveni_hlasu or notify.NastaveniHlasu())
 
         hlavni = QVBoxLayout(self)
 
@@ -76,7 +87,7 @@ class NastaveniDialog(QDialog):
         self.pokusy.setValue(nastaveni.pocet_pokusu)
         self.pokusy.setAccessibleName("Počet pokusů")
         self.pokusy.setAccessibleDescription(
-            "Kolik pokusů má hráč v jednom kole. Chybný tón spotřebuje jeden.")
+            "Kolik pokusů má hráč v jednom kole. Chybný tón spotřebí jeden.")
         pop_pokusy = QLabel("Počet pokusů:", self)
         pop_pokusy.setBuddy(self.pokusy)
         form.addRow(pop_pokusy, self.pokusy)
@@ -105,10 +116,6 @@ class NastaveniDialog(QDialog):
 
         # --- Smutná melodie ---------------------------------------------
         self.smutna = QComboBox(self)
-        for mid, nazev in melodies.nabidka_melodii(melodies.DRUH_SMUTNA):
-            self.smutna.addItem(nazev, mid)
-        self.smutna.setCurrentIndex(
-            self.smutna.findData(nastaveni.id_smutne_melodie))
         self.smutna.setAccessibleName("Smutná melodie")
         self.smutna.setAccessibleDescription(
             "Melodie, která se přehraje při chybném tónu.")
@@ -118,10 +125,6 @@ class NastaveniDialog(QDialog):
 
         # --- Vítězná melodie --------------------------------------------
         self.vitezna = QComboBox(self)
-        for mid, nazev in melodies.nabidka_melodii(melodies.DRUH_VITEZNA):
-            self.vitezna.addItem(nazev, mid)
-        self.vitezna.setCurrentIndex(
-            self.vitezna.findData(nastaveni.id_vitezne_melodie))
         self.vitezna.setAccessibleName("Vítězná melodie")
         self.vitezna.setAccessibleDescription(
             "Melodie, která se přehraje po správném zopakování sekvence.")
@@ -129,12 +132,79 @@ class NastaveniDialog(QDialog):
         pop_vitezna.setBuddy(self.vitezna)
         form.addRow(pop_vitezna, self.vitezna)
 
+        # Naplnění nabídky melodií (přednastavené + vlastní) se volá
+        # i po zavření správce vlastních melodií.
+        self._napln_kombo_melodie()
+
+        # --- Správce vlastních melodií ----------------------------------
+        self.tlacitko_spravce = QPushButton("Spravovat vlastní melodie…", self)
+        self.tlacitko_spravce.setAccessibleName("Spravovat vlastní melodie")
+        self.tlacitko_spravce.setAccessibleDescription(
+            "Otevře dialog pro vytváření, úpravu a mazání vlastních "
+            "melodií a pro zkušební přehrání.")
+        self.tlacitko_spravce.clicked.connect(self._otevri_spravce_melodii)
+        hlavni.addWidget(self.tlacitko_spravce)
+
         # --- Informace o přizpůsobení melodií ---------------------------
         self._info = QLabel(self)
         self._info.setWordWrap(True)
         self._info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._info.setAccessibleName("Informace o melodiích pro tóninu")
         hlavni.addWidget(self._info)
+
+        # --- Hlasový výstup ---------------------------------------------
+        skupina_hlas = QGroupBox("Hlasový výstup", self)
+        skupina_hlas.setAccessibleName("Hlasový výstup")
+        lay_hlas = QVBoxLayout(skupina_hlas)
+
+        form_hlas = QFormLayout()
+        form_hlas.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        lay_hlas.addLayout(form_hlas)
+
+        self.rezim_hlasu = QComboBox(self)
+        for rezim in notify.REZIMY_HLASU:
+            self.rezim_hlasu.addItem(notify.POPISKY_REZIMU[rezim], rezim)
+        self.rezim_hlasu.setCurrentIndex(
+            self.rezim_hlasu.findData(self._nastaveni_hlasu.rezim))
+        self.rezim_hlasu.setAccessibleName("Režim hlasového výstupu")
+        self.rezim_hlasu.setAccessibleDescription(
+            "Hlas vypnut: nemluví vůbec, text je jen na stavovém panelu. "
+            "Hlas jen s potvrzenou čtečkou obrazovky: mluví pouze tehdy, "
+            "když je skutečně aktivní NVDA, JAWS nebo jiná podporovaná "
+            "čtečka; jinak zůstává zticha. "
+            "Hlas i bez čtečky: přednost má čtečka, bez ní použije "
+            "systémový hlas.")
+        pop_rezim = QLabel("Režim:", self)
+        pop_rezim.setBuddy(self.rezim_hlasu)
+        form_hlas.addRow(pop_rezim, self.rezim_hlasu)
+
+        self.stav_hlasu = QLabel(self)
+        self.stav_hlasu.setWordWrap(True)
+        self.stav_hlasu.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.stav_hlasu.setAccessibleName("Stav hlasového výstupu")
+        lay_hlas.addWidget(self.stav_hlasu)
+
+        tlacitka_hlas = QHBoxLayout()
+        self.tlacitko_zjistit = QPushButton("Zjistit stav hlasu", self)
+        self.tlacitko_zjistit.setAccessibleName("Zjistit stav hlasu")
+        self.tlacitko_zjistit.setAccessibleDescription(
+            "Zjistí, jestli běží čtečka obrazovky a jestli je dostupný "
+            "systémový hlas, a výsledek přečte do tohoto pole.")
+        self.tlacitko_zjistit.clicked.connect(self._aktualizuj_stav_hlasu)
+        tlacitka_hlas.addWidget(self.tlacitko_zjistit)
+
+        self.tlacitko_zkusit = QPushButton("Zkušební hláška", self)
+        self.tlacitko_zkusit.setAccessibleName("Zkušební hláška")
+        self.tlacitko_zkusit.setAccessibleDescription(
+            "Nechá promluvit právě zvolený výstup, aby bylo poznat, "
+            "jestli je hlas slyšet. Stavové hlášení hry tím nepřepíše.")
+        self.tlacitko_zkusit.clicked.connect(self._zkusebni_hlaska)
+        tlacitka_hlas.addWidget(self.tlacitko_zkusit)
+        lay_hlas.addLayout(tlacitka_hlas)
+
+        hlavni.addWidget(skupina_hlas)
 
         # --- Tlačítka ----------------------------------------------------
         tlacitka = QDialogButtonBox(
@@ -148,11 +218,13 @@ class NastaveniDialog(QDialog):
         tlacitka.accepted.connect(self.accept)
         tlacitka.rejected.connect(self.reject)
         hlavni.addWidget(tlacitka)
+        self._tlacitka = tlacitka
 
         self.tonina.currentIndexChanged.connect(self._aktualizuj_info)
         self.smutna.currentIndexChanged.connect(self._aktualizuj_info)
         self.vitezna.currentIndexChanged.connect(self._aktualizuj_info)
         self._aktualizuj_info()
+        self._aktualizuj_stav_hlasu()
 
         self.setTabOrder(self.tonina, self.oktava)
         self.setTabOrder(self.oktava, self.pokusy)
@@ -160,8 +232,56 @@ class NastaveniDialog(QDialog):
         self.setTabOrder(self.delka, self.interval)
         self.setTabOrder(self.interval, self.smutna)
         self.setTabOrder(self.smutna, self.vitezna)
+        self.setTabOrder(self.vitezna, self.tlacitko_spravce)
+        self.setTabOrder(self.tlacitko_spravce, self.rezim_hlasu)
+        self.setTabOrder(self.rezim_hlasu, self.tlacitko_zjistit)
+        self.setTabOrder(self.tlacitko_zjistit, self.tlacitko_zkusit)
+        self.setTabOrder(self.tlacitko_zkusit, tlacitka)
 
     # ------------------------------------------------------------------
+    # Melodie
+    # ------------------------------------------------------------------
+
+    def _napln_kombo_melodie(self) -> None:
+        """Naplní oba výběry melodií; smazaná volba spadne na výchozí.
+
+        Při prvním naplnění se vychází z uloženého nastavení, po
+        zavření správce z aktuálního výběru (smazaný údaj se přeskočí).
+        """
+        for druh, combo, vychozi_id, ulozene_id in (
+            (melodies.DRUH_SMUTNA, self.smutna,
+             melodies.VYCHOZI_ID[melodies.DRUH_SMUTNA],
+             self._nastaveni.id_smutne_melodie),
+            (melodies.DRUH_VITEZNA, self.vitezna,
+             melodies.VYCHOZI_ID[melodies.DRUH_VITEZNA],
+             self._nastaveni.id_vitezne_melodie),
+        ):
+            stare_id = combo.currentData() or ulozene_id or vychozi_id
+            combo.blockSignals(True)
+            combo.clear()
+            for mid, nazev in melodies.nabidka_melodii(druh):
+                combo.addItem(nazev, mid)
+            index = combo.findData(stare_id)
+            if index < 0:
+                index = combo.findData(vychozi_id)
+            combo.setCurrentIndex(max(index, 0))
+            combo.blockSignals(False)
+
+    def _otevri_spravce_melodii(self) -> None:
+        """Otevře správce vlastních melodií; po zavření obnoví výběry."""
+        from gui.melodie_dialog import SpravceMelodiDialog
+
+        dialog = SpravceMelodiDialog(
+            self,
+            prehravac=self._prehravac,
+            oznamovac=self._oznamovac,
+            tonina=self.tonina.currentData(),
+        )
+        dialog.exec()
+        self._napln_kombo_melodie()
+        self._aktualizuj_info()
+        self.activateWindow()
+        self.tlacitko_spravce.setFocus()
 
     def _aktualizuj_info(self) -> None:
         """Popíše, odkud se melodie pro vybranou tóninu vezme."""
@@ -170,7 +290,8 @@ class NastaveniDialog(QDialog):
         for druh, combo in ((melodies.DRUH_SMUTNA, self.smutna),
                             (melodies.DRUH_VITEZNA, self.vitezna)):
             volba = melodies.ziskej_melodii(tonina, druh, combo.currentData())
-            zdroj = {"individualni": "individuální definice",
+            zdroj = {"vlastni": "vlastní melodie",
+                     "individualni": "individuální definice",
                      "transpozice": "automatická transpozice",
                      "zalozni": "záložní náhrada"}.get(volba.zdroj, volba.zdroj)
             casti.append(f"{volba.melodie.nazev}: {zdroj}")
@@ -181,9 +302,38 @@ class NastaveniDialog(QDialog):
         self._info.setText(text)
 
     # ------------------------------------------------------------------
+    # Hlasový výstup
+    # ------------------------------------------------------------------
+
+    def _aktualizuj_stav_hlasu(self) -> None:
+        """Zjistí stav hlasu (čtečka vs. systémový hlas) a zobrazí ho."""
+        if self._oznamovac is None:
+            self.stav_hlasu.setText(
+                "Stav hlasu není k dispozici — dialog není napojený "
+                "na oznamovací modul.")
+            self.tlacitko_zjistit.setEnabled(False)
+            self.tlacitko_zkusit.setEnabled(False)
+            return
+        self.stav_hlasu.setText(self._oznamovac.popis_dostupnosti)
+
+    def _zkusebni_hlaska(self) -> None:
+        """Promluví zkušební hláškou (stavový panel se nepřepíše)."""
+        if self._oznamovac is None:
+            return
+        promluvilo = self._oznamovac.zkusebni_hlaseni()
+        stav = self._oznamovac.popis_dostupnosti
+        if promluvilo:
+            vysledek = "Zkušební hláška byla předána hlasovému výstupu."
+        else:
+            vysledek = ("Zkušební hlášku teď nelze přehrát — "
+                        "podívejte se na stav hlasu.")
+        self.stav_hlasu.setText(f"{vysledek} {stav}")
+        self.stav_hlasu.setFocus()
+
+    # ------------------------------------------------------------------
 
     def hodnoty(self) -> dict:
-        """Validované hodnoty z dialogu."""
+        """Validované hodnoty nastavení hry z dialogu."""
         hodnoty = {
             "tonina": self.tonina.currentData(),
             "oktava": int(self.oktava.currentData()),
@@ -201,3 +351,10 @@ class NastaveniDialog(QDialog):
         if hodnoty["interval_statistik"] < 1:
             raise ValueError("Interval statistik musí být kladné celé číslo.")
         return hodnoty
+
+    def hodnoty_hlasu(self) -> notify.NastaveniHlasu:
+        """Validované nastavení hlasového výstupu z dialogu."""
+        nastaveni = notify.NastaveniHlasu(
+            rezim=str(self.rezim_hlasu.currentData()))
+        nastaveni.over()
+        return nastaveni

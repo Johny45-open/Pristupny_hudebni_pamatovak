@@ -28,8 +28,14 @@ def vytvor_app(argv: list[str] | None = None) -> QApplication:
 def main() -> int:
     app = vytvor_app()
 
-    # Načtení uloženého nastavení (QSettings, INI v profilu uživatele).
+    # Načtení uloženého nastavení (QSettings — na Windows registr,
+    # viz uloziste) a nastavení hlasového výstupu.
     nastaveni = uloziste.nacti_nastaveni()
+    nastaveni_hlasu = uloziste.nacti_nastaveni_hlasu()
+
+    # Vlastní melodie z JSON souboru. Poškozená data nikdy nezruší
+    # přednastavené melodie — jen se ohlásí.
+    _, chyby_melodii = uloziste.nacti_vlastni_melodie()
 
     # Zvuk — bez zařízení aplikace běží v tichém režimu, nepadá.
     motor = ZvukovyMotor()
@@ -40,17 +46,22 @@ def main() -> int:
     spravce = SpravceStatistik(interval_cil=nastaveni.interval_statistik)
     logika = HerniLogika(nastaveni=nastaveni, spravce=spravce)
 
-    okno = HlavniOkno(logika, motor, oznamovac, nastaveni)
+    okno = HlavniOkno(logika, motor, oznamovac, nastaveni,
+                      nastaveni_hlasu=nastaveni_hlasu)
     okno.show()
 
     # Uvolnění zvuku až po ukončení smyčky událostí.
     app.aboutToQuit.connect(motor.uvolni)
 
-    okno._oznam(
+    casti = []
+    if chyby_melodii:
+        casti.append(
+            "Při načítání vlastních melodií nastal problém: "
+            + "; ".join(chyby_melodii) + ".")
+    casti.append(
         "Hudební pamatovák je připraven. Spusťte novou hru klávesou F2. "
-        + motor.popis_rezimu() + " " + oznamovac.popis_dostupnosti,
-        hlasite=False,
-    )
+        + motor.popis_rezimu() + " " + oznamovac.popis_dostupnosti)
+    okno._oznam(" ".join(casti), hlasite=False)
 
     kod = app.exec()
 

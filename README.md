@@ -12,8 +12,16 @@ je ovladatelné klávesnicí pro uživatele s odečítačem obrazovky (NVDA, JAW
 - Sedm tlačítek tónů = stupnice od základního tónu vzhůru; názvy jsou
   enharmonicky správné (Eis, Fes, His, Ces…) a vždy obsahují oktávu.
 - Nastavení: tónina, výchozí oktáva (3/4/5), počet pokusů, délka sekvence
-  (2–12), interval statistik, smutná a vítězná melodie. Nastavení se ukládá
-  trvale (QSettings) a použije se od dalšího kola.
+  (2–12), interval statistik, smutná a vítězná melodie a hlasový výstup.
+  Nastavení se ukládá trvale (QSettings) a použije se od dalšího kola.
+- Vlastní melodie: uživatel je vytvoří, upraví, smaže i zkušebně přehraje
+  přímo v aplikaci (tlačítko „Spravovat vlastní melodie…“ v nastavení),
+  bez úpravy zdrojového kódu. Ukládají se trvale do JSON souboru;
+  poškozená data aplikaci nerozbijí a přednastavené melodie zůstávají.
+- Hlasový výstup ve třech režimech: vypnutý; jen s potvrzenou aktivní
+  čtečkou obrazovky (bez potvrzení aplikace nehlasitě nemluví); i bez
+  čtečky (přednost má čtečka, jinak systémový hlas). Viz sekce
+  „Hlasový výstup“.
 - Pravidla: chyba = jeden pokus + smutná melodie + návrat na začátek
   sekvence; úspěch = vítězná melodie; opakované přehrání sekvence nemění
   skóre ani pokusy.
@@ -77,13 +85,16 @@ python -m pytest tests\test_stats.py -q
 python -m pytest tests\test_player_worker.py -q
 python -m pytest tests\test_settings.py -q
 python -m pytest tests\test_notify.py -q
+python -m pytest tests\test_vlastni_melodie.py -q
+python -m pytest tests\test_uloziste_melodie.py -q
 python -m pytest tests\test_gui_offscreen.py -q
+python -m pytest tests\test_gui_melodie.py -q
 ```
 
 Kontrola syntaxe:
 
 ```powershell
-python -m py_compile theory.py melodies.py game_logic.py stats.py sound.py player_worker.py notify.py uloziste.py main.py gui\main_window.py gui\settings_dialog.py gui\stats_dialog.py
+python -m py_compile theory.py melodies.py game_logic.py stats.py sound.py player_worker.py notify.py uloziste.py main.py gui\main_window.py gui\settings_dialog.py gui\melodie_dialog.py gui\stats_dialog.py
 ```
 
 ## Struktura projektu
@@ -97,14 +108,48 @@ python -m py_compile theory.py melodies.py game_logic.py stats.py sound.py playe
 | `stats.py` | intervalové a celkové statistiky |
 | `sound.py` | matematické generování tónů, přehrávání přes pygame, tichý režim |
 | `player_worker.py` | QThread worker s kooperativním přerušením přehrávání |
-| `notify.py` | hlasová oznámení (accessible_output2) + stavový panel jako fallback |
-| `uloziste.py` | ukládání a načítání nastavení přes QSettings |
-| `gui/` | hlavní okno, dialog nastavení, dialog statistik (PyQt6, česky) |
+| `notify.py` | hlasová oznámení (accessible_output2) + stavový panel jako fallback; režimy hlasu a rozlišení čtečky vs. systémového hlasu |
+| `uloziste.py` | nastavení přes QSettings, nastavení hlasu a bezpečný JSON s vlastními melodiemi |
+| `gui/` | hlavní okno, dialog nastavení, správce a editor vlastních melodií, dialog statistik (PyQt6, česky) |
 | `tests/` | pytest sady (offscreen, bez zvuku) |
 
-## Vlastní melodie (jen `melodies.py`)
+## Vlastní melodie
 
-Melodie se definují jednou v tónině C a automaticky se transponují do všech
+**V aplikaci (bez úpravy zdrojového kódu):** v dialogu Nastavení je
+tlačítko „Správce vlastních melodií…“ (klávesa S). V otevřeném správci:
+
+1. „Nová melodie…“ otevře editor: název, druh (smutná/vítězná), tempo,
+   mezertonová pauza a seznam tónů (tón + délka v taktech + pauza po tónu).
+   Tlačítka „Přidat tón“, „Nahradit“, „Odebrat“ upravují seznam; zkušební
+   přehrávání má vlastní tlačítko pro každý tón (F6 přehraje celý dosud
+   zadaný seznam).
+2. „Upravit vybranou melodii…“ otevře tutéž editační obrazovku s vyplněnými
+   údaji; uložením se melodie přepíše, „Zrušit“ původní verzi nechá beze
+   změny.
+3. „Smazat vybranou melodii…“ melodie po potvrzení smaže — i z disku.
+
+Uložené melodie se objeví ve výběrech smutné a vítězné melodie s poznámkou
+„(vlastní)“ a platí pro ně stejná pravidla jako pro přednastavené
+(transpozice do všech tónin, kontrola tónů mimo stupnici). Pokud je
+právě vybraná vlastní melodie smazána, automaticky se oba výběry vrátí
+na výchozí melodii.
+
+**Úložiště:** nastavení (včetně režimu hlasu) drží `QSettings` — na
+Windows je to registr `HKCU\Software\PristupnyHudebniPamatovak`, protože
+aplikace nepoužívá INI soubor. Proto jsou vlastní melodie v samostatném
+JSON souboru v datech aplikace:
+
+```
+%APPDATA%\PristupnyHudebniPamatovak\HudebniPamatovak\vlastni_melodie.json
+```
+
+(Pokud by `QSettings` pracoval s souborem INI, JSON leží vedle něj.)
+Zápis je atomický přes dočasný soubor; neplatná melodie se nezapíše a
+poškozený soubor se při startu srozumitelně ohlásí — přednastavené melodie
+zůstávají vždy a poslední platná definice se nepřepíše.
+
+**Ve zdrojovém kódu (pro vývojáře):** melodie se definují jednou
+v tónině C a automaticky se transponují do všech
 15 tónin. Pro konkrétní tóninu lze definovat nezávislou melodii, která má
 přednost. Příklad (do slovníku `INDIVIDUALNI_MELODIE`):
 
@@ -123,6 +168,31 @@ Tóny mimo stupnici jsou povoleny jen příznakem `povolit_mimo_stupnici=True`;
 jinak je melodie odmítnuta a použije se bezpečná náhrada. Herní logiku,
 GUI ani zvukový engine kvůli nové melodii měnit nemusíte.
 
+## Hlasový výstup — režimy
+
+Režim se volí v dialogu Nastavení (sekce „Hlasový výstup“) a ukládá se
+trvale. Textová oznámení zůstávají na stavovém panelu vždy — v každém
+režimu a bez ohledu na to, zda hlas funguje.
+
+| Režim | Chování |
+|---|---|
+| `vypnuto` („Hlas vypnutý“) | Aplikace nehlasitě nemluví vůbec; všechna hlášení jsou jen na stavovém panelu. |
+| `jen_odecitas` („Hlas jen s potvrzenou čtečkou obrazovky“) | Hlasitě mluví jen tehdy, když je skutečně aktivní známá čtečka obrazovky (NVDA, JAWS, System Access, Dolphin, PC Talker, Window-Eyes, ZDSR) a její `is_active()` to potvrdí. Bez potvrzení zůstává zticha, i kdyby byl dostupný systémový hlas SAPI. |
+| `vcetne_systemu` („Hlas i bez čtečky (systémový hlas)“) — **výchozí** | Chování jako před zavedením režimů: nejdřív se pokusí mluvit přes potvrzenou čtečku, bez ní použije systémový hlas. |
+
+Pravidla pro „potvrzení čtečky“ (ověřena proti nainstalované
+`accessible_output2` 0.17):
+
+- Samotná dostupnost `Auto()` ani přítomnost systémového hlasu (SAPI5)
+  se za potvrzení čtečky NEPOVAŽUJE.
+- `is_active()`, který vyhodí výjimku nebo u výstupu chybí (takto se
+  chová sapi4), se za potvrzení aktivity nepovažuje.
+
+V dialogu Nastavení je „Zjistit stav hlasu“ (srozumitelně vypíše, zda je
+potvrzena čtečka, zda je dostupný systémový hlas a jaký režim platí) a
+„Zkušební hláška“ — ta přehraje zkušební text přes právě dostupný výstup
+podle zvoleného režimu a přepíše jen hlášení v dialogu, ne hlášení herní.
+
 ## Přístupnost — co je a co není ověřeno
 
 **Ověřeno automaticky (offscreen testy):** přístupné názvy a popisy všech
@@ -131,10 +201,17 @@ ovládacích prvků (žádné generické „Tlačítko 1“), propojení popisk�
 (včetně přístupného názvu panelu), kontext kláves 1–7 (neaktivní v modálních
 dialozích a číselných polích), návrat fokusu po kole a po zavření dialogů,
 bezpečné odložení zavírání, skutečné ukončení workeru (`wait()` + `isFinished()`),
-fungování bez zvukového zařízení.
+fungování bez zvukového zařízení. Dále sekce hlasového výstupu v nastavení
+(tři režimy, stav, zkušební hláška), přístupnost správce a editoru vlastních
+melodií, že po dokončení zkušební ukázky zůstane editor otevřený s fokusem
+uvnitř něj a že smazání právě vybrané melodie aktualizuje oba výběry,
+uložené hodnoty i interní reference (bez změny nesouvisejícího nastavení).
 
-**Není fyzicky ověřeno:** průběh s reálně spuštěným NVDA nebo JAWS a reálný
-hlasový výstup. Přítomnost `setAccessibleName()` sama o sobě kompatibilitu
+**Není fyzicky ověřeno:** průběh s reálně spuštěným NVDA nebo JAWS
+(včetně chování režimu `jen_odecitas` s reálnou čtečkou) a reálný
+hlasový výstup. Testy hlasových režimů pracují s věrnými atrapami
+výstupů `accessible_output2`, ne s živou čtečkou. Přítomnost
+`setAccessibleName()` sama o sobě kompatibilitu
 s odečítačem negarantuje. Manuální postup testu s NVDA:
 
 1. Spusťte NVDA, pak `python main.py`.
@@ -166,5 +243,12 @@ S JAWS postupujte stejně (JAWS čte stejné standardní názvy přístupnosti).
   nevzniká (Qt používá systémová písma).
 - Výchozí oktáva 4; rozsah tlačítek je přibližně C4–A5 podle tóniny (u
   tónin s ostrým základem může horní stupeň přesáhnout do oktávy 6).
-- Hlasová oznámení používají `accessible_output2` (SAPI); pokud není
-  aktivní žádný odečítač, text zůstává čitelný na přístupném stavovém panelu.
+- Hlasová oznámení používají `accessible_output2`; výběr výstupu se řídí
+  zvoleným režimem (viz „Hlasový výstup“). Pokud není žádný výstup k
+  dispozici, text zůstává čitelný na přístupném stavovém panelu.
+- Nastavení se na Windows ukládá do registru (`QSettings` v nativním
+  formátu), ne do INI souboru; vlastní melodie proto mají vlastní JSON
+  v `%APPDATA%` (viz „Vlastní melodie“).
+- Při testech s hlasem může `accessible_output2` vyvolat u SAPI tichou
+  systémovou výjimku („Windows fatal exception 0xe0000002“) — je to
+  předexistující jev knihovny/SAPI, na výsledcích testů se neprojevuje.

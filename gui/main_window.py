@@ -36,7 +36,7 @@ import theory
 from game_logic import HerniLogika, NastaveniHry, StavKola
 from gui.settings_dialog import NastaveniDialog
 from gui.stats_dialog import StatsDialog
-from notify import Oznamovac
+from notify import NastaveniHlasu, Oznamovac
 from player_worker import Prehravac, Uloha
 from sound import ZvukovyMotor
 from melodies import KrokPrehravani
@@ -103,6 +103,7 @@ class HlavniOkno(QMainWindow):
         motor: ZvukovyMotor,
         oznamovac: Oznamovac,
         nastaveni: NastaveniHry | None = None,
+        nastaveni_hlasu: NastaveniHlasu | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -110,6 +111,9 @@ class HlavniOkno(QMainWindow):
         self.motor = motor
         self.oznamovac = oznamovac
         self.nastaveni = nastaveni or logika.nastaveni
+        self.nastaveni_hlasu = nastaveni_hlasu or NastaveniHlasu()
+        # Režim hlasu z nastavení (vypnuto / jen s čtečkou / i bez čtečky).
+        self.oznamovac.nastav_rezim(self.nastaveni_hlasu.rezim)
 
         # Stav workeru a zavírání.
         self._worker: Prehravac | None = None
@@ -443,6 +447,18 @@ class HlavniOkno(QMainWindow):
         if preruseno:
             return
 
+        if typ == "ukazka":
+            # Zkušební ukázka melodie: fokus se NESMÍ přesunout do
+            # hlavního okna — editor melodií musí zůstat otevřený
+            # a zaměřený, dokud se po ukázce vrátí ovládání.
+            modal = QApplication.activeModalWidget()
+            if modal is not None:
+                self._oznam("Zkušební ukázka melodie dohrála.")
+                self._vrat_fokus_do_dialogu(modal)
+                return
+            self._nastav_fokus(self._fokus_po_prehrani)
+            return
+
         if typ == "sekvence":
             # Dokončené přehrání sekvence: povolit vstup (jen poprvé).
             self.logika.sekvence_prehrana()
@@ -482,6 +498,31 @@ class HlavniOkno(QMainWindow):
         elif self._t_nova.isEnabled():
             self._t_nova.setFocus()
 
+    def _vrat_fokus_do_dialogu(self, dialog: QWidget) -> None:
+        """Zaměří prvek uvnitř právě otevřeného modálního dialogu.
+
+        Používá se po dokončení zkušební ukázky: hlavní okno se nesmí
+        ujmout fokusu, dokud je editor melodií otevřený.
+        """
+        dialog.activateWindow()
+        cil = self._fokus_pred
+        if (cil is not None and cil.isVisible() and cil.isEnabled()
+                and dialog.isAncestorOf(cil)):
+            cil.setFocus()
+            return
+        # Záloha: první zaměřitelný prvek v pořadí Tab v dialogu.
+        prvek = dialog.nextInFocusChain()
+        zacatek = prvek
+        while True:
+            if (prvek.isVisible() and prvek.isEnabled()
+                    and prvek.focusPolicy() != Qt.FocusPolicy.NoFocus):
+                prvek.setFocus()
+                return
+            prvek = prvek.nextInFocusChain()
+            if prvek is zacatek:
+                break
+        dialog.setFocus()
+
     # ==================================================================
     # Akce hry
     # ==================================================================
@@ -501,6 +542,32 @@ class HlavniOkno(QMainWindow):
         if volba.varovani:
             self._oznam(f"Poznámka k melodii: {volba.varovani}")
         return melodies.casovy_plan(volba.melodie)
+
+    def prehraj_ukazku(self, melodie: melodies.Melodie, tonina: str) -> bool:
+        """Zkušební přehrání melodie z editoru (na hru ani skóre nemá vliv).
+
+        Volá ji editor vlastních melodií (přes dialog Nastavení). Po
+        dokončení se fokus vrátí do editoru, ne do hlavního okna
+        (viz větev „ukazka“ v ``_dokonceni_ulohy``).
+        """
+        if self._worker is not None and not self._worker.isFinished():
+            self._oznam("Čekám na ukončení probíhajícího přehrávání.")
+            return False
+        if self._pozastavena:
+            self._oznam("Hra je pozastavena. Nejdřív pokračujte ve hře.")
+            return False
+        try:
+            prelozena = melodies.transponuj_melodii(melodie, tonina)
+            kroky = melodies.casovy_plan(prelozena)
+        except (ValueError, RuntimeError) as e:
+            self._oznam(f"Melodii nelze přehrát: {e}")
+            return False
+        self._oznam(
+            f"Přehrávám ukázku melodie {melodie.nazev} "
+            f"v tónině {theory.POPISKY_TONIN.get(tonina, tonina)}.")
+        return self._spust_ulohu("ukazka", kroky,
+                                 f"ukázka melodie {melodie.nazev}",
+                                 fokus_po="zachovat")
 
     def _akce_povolena(self) -> bool:
         """Akce z klávesnic zkratek jen když není otevřený modální dialog."""
@@ -613,18 +680,64 @@ class HlavniOkno(QMainWindow):
         if self._worker is not None and not self._worker.isFinished():
             self._oznam("Čekám na ukončení probíhajícího přehrávání.")
             return
-        dialog = NastaveniDialog(self.nastaveni, self)
+        dialog = NastaveniDialog(
+            self.nastaveni, self,
+            nastaveni_hlasu=self.nastaveni_hlasu,
+            oznamovac=self.oznamovac,
+            prehravac=self.prehraj_ukazku,
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             try:
                 hodnoty = dialog.hodnoty()
+                hodnoty_hlasu = dialog.hodnoty_hlasu()
             except ValueError as e:
                 self._oznam(f"Neplatné nastavení: {e}")
                 self._t_nastaveni.setFocus()
                 return
             self._pouzij_nastaveni(hodnoty)
+            self._pouzij_nastaveni_hlasu(hodnoty_hlasu)
+        # Po zavření editoru melodií (i při Zrušit) musí oba výběry
+        # ukazovat jen na existující melodie — smazaná volba se vrátí
+        # na výchozí ID.
+        self._srovnaj_vyber_melodii()
         self.activateWindow()
         # Fokus až po události aktivace okna (asynchronní).
         QTimer.singleShot(0, self._t_nastaveni.setFocus)
+
+    def _pouzij_nastaveni_hlasu(self, hodnoty: NastaveniHlasu) -> None:
+        """Nastavení hlasu: uložit na disk + použít v oznamovacím modulu."""
+        hodnoty.over()
+        uloziste.uloz_nastaveni_hlasu(hodnoty)
+        self.nastaveni_hlasu = hodnoty
+        self.oznamovac.nastav_rezim(hodnoty.rezim)
+        self._oznam(f"Nastavení hlasu uloženo. {self.oznamovac.popis_dostupnosti}")
+
+    def _srovnaj_vyber_melodii(self) -> None:
+        """Vrátí smazané volby melodií na výchozí ID (disk + logika + GUI).
+
+        Volá se po zavření nastavení i správce melodií — i když uživatel
+        zrušil uložení, nesmí zůstat uložené ani interní reference na
+        smazanou melodii. Nesouvisející nastavení se nemění.
+        """
+        zmeny: dict[str, str] = {}
+        for druh, atribut in (
+            (melodies.DRUH_SMUTNA, "id_smutne_melodie"),
+            (melodies.DRUH_VITEZNA, "id_vitezne_melodie"),
+        ):
+            id_melodie = getattr(self.nastaveni, atribut)
+            if not melodies.je_dostupna_melodie(druh, id_melodie):
+                zmeny[atribut] = melodies.VYCHOZI_ID[druh]
+        if not zmeny:
+            return
+        nove = NastaveniHry(**{**self.nastaveni.__dict__, **zmeny})
+        nove.over()
+        self.nastaveni = nove
+        uloziste.uloz_nastaveni(nove)
+        # Jen dotčené klíče — interval statistik se nesmí měnit.
+        self.logika.zmenit_nastaveni(**zmeny)
+        self._aktualizuj_info()
+        self._oznam(
+            "Vybraná melodie byla smazána. Vrací se výchozí melodie.")
 
     def _pouzij_nastaveni(self, hodnoty: dict) -> None:
         """Nastavení: uložit na disk + použít pro další kola."""
