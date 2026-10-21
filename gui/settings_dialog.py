@@ -32,7 +32,9 @@ class NastaveniDialog(QDialog):
     def __init__(self, nastaveni, parent=None, *,
                  nastaveni_hlasu=None,
                  oznamovac=None,
-                 prehravac=None) -> None:
+                 prehravac=None,
+                 prehravac_kroku=None,
+                 zastav_ukazku=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Nastavení hry")
         self.setModal(True)
@@ -42,6 +44,8 @@ class NastaveniDialog(QDialog):
         self._nastaveni = nastaveni   # kopie pro čtení výchozích hodnot
         self._oznamovac = oznamovac           # pro stav a zkušební hlášku
         self._prehravac = prehravac           # (melodie, tonina) -> bool
+        self._prehravac_kroku = prehravac_kroku   # (kroky, popis) -> bool
+        self._zastav_ukazku = zastav_ukazku       # () -> bool
         self._nastaveni_hlasu = (nastaveni_hlasu or notify.NastaveniHlasu())
 
         hlavni = QVBoxLayout(self)
@@ -274,6 +278,8 @@ class NastaveniDialog(QDialog):
         dialog = SpravceMelodiDialog(
             self,
             prehravac=self._prehravac,
+            prehravac_kroku=self._prehravac_kroku,
+            zastav_ukazku=self._zastav_ukazku,
             oznamovac=self._oznamovac,
             tonina=self.tonina.currentData(),
         )

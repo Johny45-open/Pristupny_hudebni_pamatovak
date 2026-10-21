@@ -1,6 +1,9 @@
 """Programové generování a přehrávání tónů (pygame + numpy).
 
 - Žádné externí zvukové soubory — tóny se generují matematicky.
+- Krátké rytmické klepy (``generuj_impuls``) pro průvodce rytmem
+  mají vlastní funkci i cache — přehrávání běžných melodií se jím
+  nemění.
 - Pokud zařízení pro přehrávání není dostupné, modul přechází do
   TICHÉHO REŽIMU a aplikace se nezhroutí (funguje logika i GUI).
 - Přehrávání je určeno pro práci ve vlákně (worker), nikoli v GUI.
@@ -65,6 +68,45 @@ def _pocet_vzorku(zvuk_s: float, vzorkovaci: int) -> int:
     return max(1, int(round(zvuk_s * vzorkovaci)))
 
 
+def generuj_impuls(
+        zvuk_s: float = 0.08,
+        hlasitost: float = 0.5,
+        vzorkovaci: int = VZORKOVACI_FREKVENCE,
+) -> np.ndarray:
+    """Vygeneruje krátký neutrální rytmický klep (bez výšky tónu).
+
+    Používá se JEN pro přehrávání rytmu v průvodci rytmem. Běžné
+    tóny generuje ``generuj_vlnu`` — ta se touto funkcí nijak nemění.
+    Signál = deterministický šum s rychlým útlumem + krátká vysoká
+    složka pro slyšitelný nápad (charakter „klik“).
+    """
+    if zvuk_s <= 0:
+        raise ValueError(f"Délka impulsu musí být kladná: {zvuk_s}")
+    n = _pocet_vzorku(zvuk_s, vzorkovaci)
+    t = np.arange(n, dtype=np.float64) / vzorkovaci
+
+    # Deterministický šum (stejný impuls se vždy vygeneruje stejně).
+    rng = np.random.default_rng(20241018)
+    sumeni = rng.uniform(-1.0, 1.0, n)
+
+    # Společná obálka: rychlý náběh (2 ms) a exponenciální útlum.
+    obalka = np.exp(-7.0 * np.linspace(0.0, 1.0, n))
+    nabeh = min(int(0.002 * vzorkovaci), n)
+    if nabeh > 1:
+        obalka[:nabeh] *= np.linspace(0.0, 1.0, nabeh)
+
+    signal = 0.65 * sumeni * obalka
+    signal += 0.45 * np.sin(2.0 * math.pi * 1900.0 * t) * obalka
+    signal *= hlasitost
+    signal = np.clip(signal, -1.0, 1.0)
+
+    stereo = np.empty((n, 2), dtype=np.int16)
+    pcm = (signal * 32767.0).astype(np.int16)
+    stereo[:, 0] = pcm
+    stereo[:, 1] = pcm
+    return stereo
+
+
 class ZvukovyMotor:
     """Spravuje mixer a přehrávání. Bez zvukového zařízení běží tichý režim."""
 
@@ -74,6 +116,7 @@ class ZvukovyMotor:
         self._pygame = None
         self._kanal = None
         self._cache: dict[tuple[int, float], object] = {}
+        self._cache_impulsu: dict[float, object] = {}
 
         try:
             import pygame
@@ -105,6 +148,22 @@ class ZvukovyMotor:
         if zvuk is None:
             zvuk = self._pygame.sndarray.make_sound(generuj_vlnu(midi, zvuk_s))
             self._cache[klic] = zvuk
+        return zvuk
+
+    def vytvor_impuls(self, zvuk_s: float):
+        """Vrátí krátký rytmický klep (cache samostatná od tónů).
+
+        Slouží jen pro průvodce rytmem; přehrávání běžných melodií
+        (``vytvor_zvuk``) touto metodou prochází nezměněné.
+        V tichém režimu vrací None.
+        """
+        if not self.dostupny:
+            return None
+        klic = round(zvuk_s, 3)
+        zvuk = self._cache_impulsu.get(klic)
+        if zvuk is None:
+            zvuk = self._pygame.sndarray.make_sound(generuj_impuls(zvuk_s))
+            self._cache_impulsu[klic] = zvuk
         return zvuk
 
     def prehraj(self, zvuk):
@@ -144,6 +203,7 @@ class ZvukovyMotor:
         """Uvolní zdroje mixéru při ukončení aplikace."""
         try:
             self._cache.clear()
+            self._cache_impulsu.clear()
             if self.dostupny:
                 self._pygame.mixer.quit()
         except Exception:   # noqa: BLE001

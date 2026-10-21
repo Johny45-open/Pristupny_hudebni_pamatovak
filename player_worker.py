@@ -24,7 +24,7 @@ KROK_CEKANI_S = 0.02          # čtyřikrát za 100 ms — reakce na přerušen�
 class Uloha:
     """Úloha přehrávání: posledek kroků + identifikace pro GUI."""
 
-    typ: str                  # "sekvence" | "vitezna" | "smutna" | "ton"
+    typ: str                  # "sekvence" | "vitezna" | "smutna" | "ton" | "ukazka"
     kroky: tuple              # tuple[KrokPrehravani, ...]
     popis: str = ""
 
@@ -87,7 +87,12 @@ class Prehravac(QThread):
                     break
 
                 # Vytvoření zvuku (v tichém režimu vrátí None).
-                zvuk = self._motor.vytvor_zvuk(krok.midi, krok.zvuk_s)
+                # Impulzní kroky = krátký rytmický klep (průvodce
+                # rytmem); běžné tóny jdou stejnou cestou jako dřív.
+                if krok.impuls:
+                    zvuk = self._motor.vytvor_impuls(krok.zvuk_s)
+                else:
+                    zvuk = self._motor.vytvor_zvuk(krok.midi, krok.zvuk_s)
                 kanal = self._motor.prehraj(zvuk)
 
                 if kanal is not None:

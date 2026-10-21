@@ -57,6 +57,8 @@ class UpravMelodiiDialog(QDialog):
     def __init__(self, melodie: melodies.Melodie | None = None, parent=None, *,
                  tonina: str = "C",
                  prehravac=None,
+                 prehravac_kroku=None,
+                 zastav_ukazku=None,
                  oznamovac=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Úprava vlastní melodie")
@@ -65,6 +67,8 @@ class UpravMelodiiDialog(QDialog):
             "Údaje vlastní melodie: název, druh, tempo, tóny a zkušební "
             "přehrání.")
         self._prehravac = prehravac        # (melodie, tonina) -> bool
+        self._prehravac_kroku = prehravac_kroku
+        self._zastav_ukazku = zastav_ukazku
         self._oznamovac = oznamovac
         self._id = (melodie.id if melodie is not None
                     else melodies.nova_id_melodie())
@@ -250,6 +254,17 @@ class UpravMelodiiDialog(QDialog):
         self.tlacitko_ukazka.setEnabled(prehravac is not None)
         hlavni.addWidget(self.tlacitko_ukazka)
 
+        self.tlacitko_pruvodce = QPushButton(
+            "Průvodce rytmem a fanfárami", self)
+        self.tlacitko_pruvodce.setAccessibleName(
+            "Průvodce rytmem a fanfárami")
+        self.tlacitko_pruvodce.setAccessibleDescription(
+            "Otevře průvodce s vysvětlením tempa a délkami v dobách, "
+            "s rytmickými příklady a se vzory fanfár, které lze "
+            "přehrát, upravit i otevřít v editoru jako vlastní kopii.")
+        self.tlacitko_pruvodce.clicked.connect(self._otevri_pruvodce)
+        hlavni.addWidget(self.tlacitko_pruvodce)
+
         tlacitka = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save
             | QDialogButtonBox.StandardButton.Cancel,
@@ -296,6 +311,7 @@ class UpravMelodiiDialog(QDialog):
         self.setTabOrder(self.ton_nazev, self.ton_delka)
         self.setTabOrder(self.ton_delka, self.ton_pauza)
         self.setTabOrder(self.ton_pauza, self.tlacitko_pridat)
+        self.setTabOrder(self.tlacitko_ukazka, self.tlacitko_pruvodce)
         # Počáteční stav tlačítek tónů (bez výběru jsou vypnutá).
         self._polozka_zmenena(self.tony_seznam.currentRow())
 
@@ -484,6 +500,24 @@ class UpravMelodiiDialog(QDialog):
             self._stav.setText("Ukázku se teď nepodařilo spustit — "
                                "podívejte se na hlášení v okně hry.")
 
+    def _otevri_pruvodce(self) -> None:
+        """Otevře průvodce rytmem (přes rozpracovanou melodii editoru)."""
+        from gui.pruvodce_dialog import PruvodceRytmuDialog   # bez cyklu importů
+
+        melodie, _ = self._sesbiraj(pouze_ukazka=True)
+        dialog = PruvodceRytmuDialog(
+            self,
+            prehravac=self._prehravac,
+            prehravac_kroku=self._prehravac_kroku,
+            zastav_ukazku=self._zastav_ukazku,
+            oznamovac=self._oznamovac,
+            melodie=melodie,
+        )
+        dialog.exec()
+        # Návrat fokusu do editoru po zavření průvodce.
+        self.activateWindow()
+        self.tlacitko_pruvodce.setFocus()
+
     def _ulozit(self) -> None:
         melodie, chyby = self._sesbiraj(pouze_ukazka=False)
         if melodie is None:
@@ -520,8 +554,9 @@ class UpravMelodiiDialog(QDialog):
 class SpravceMelodiDialog(QDialog):
     """Seznam vlastních melodií + vytvoření, úprava a smazání."""
 
-    def __init__(self, parent=None, *, prehravac=None, oznamovac=None,
-                 tonina: str = "C") -> None:
+    def __init__(self, parent=None, *, prehravac=None,
+                 prehravac_kroku=None, zastav_ukazku=None,
+                 oznamovac=None, tonina: str = "C") -> None:
         super().__init__(parent)
         self.setWindowTitle("Vlastní melodie")
         self.setModal(True)
@@ -529,6 +564,8 @@ class SpravceMelodiDialog(QDialog):
             "Seznam vlastních melodií s tlačítky pro vytvoření, úpravu "
             "a smazání.")
         self._prehravac = prehravac
+        self._prehravac_kroku = prehravac_kroku
+        self._zastav_ukazku = zastav_ukazku
         self._oznamovac = oznamovac
         self._tonina = tonina
 
@@ -581,6 +618,16 @@ class SpravceMelodiDialog(QDialog):
         self.tlacitko_smazat.clicked.connect(self._smaz_vybranou)
         tlacitka.addWidget(self.tlacitko_smazat)
 
+        self.tlacitko_pruvodce = QPushButton(
+            "Průvodce rytmem", self)
+        self.tlacitko_pruvodce.setAccessibleName("Průvodce rytmem a fanfárami")
+        self.tlacitko_pruvodce.setAccessibleDescription(
+            "Otevře průvodce s vysvětlením tempa a délkami v dobách, "
+            "s rytmickými příklady a se vzory fanfár, které lze "
+            "přehrát, upravit i otevřít v editoru jako vlastní kopii.")
+        self.tlacitko_pruvodce.clicked.connect(self._otevri_pruvodce)
+        tlacitka.addWidget(self.tlacitko_pruvodce)
+
         tlacitka.addStretch(1)
         prostredni.addLayout(tlacitka)
         hlavni.addLayout(prostredni)
@@ -611,7 +658,8 @@ class SpravceMelodiDialog(QDialog):
         self.setTabOrder(self.seznam, self.tlacitko_nova)
         self.setTabOrder(self.tlacitko_nova, self.tlacitko_upravit)
         self.setTabOrder(self.tlacitko_upravit, self.tlacitko_smazat)
-        self.setTabOrder(self.tlacitko_smazat, tlacitka_dol)
+        self.setTabOrder(self.tlacitko_smazat, self.tlacitko_pruvodce)
+        self.setTabOrder(self.tlacitko_pruvodce, tlacitka_dol)
 
     # ------------------------------------------------------------------
 
@@ -673,6 +721,8 @@ class SpravceMelodiDialog(QDialog):
             melodie, self,
             tonina=self._tonina,
             prehravac=self._prehravac,
+            prehravac_kroku=self._prehravac_kroku,
+            zastav_ukazku=self._zastav_ukazku,
             oznamovac=self._oznamovac,
         )
         if editor.exec() == QDialog.DialogCode.Accepted:
@@ -681,6 +731,22 @@ class SpravceMelodiDialog(QDialog):
             if ulozena is not None:
                 self._stav.setText(f"Uloženo: {ulozena.nazev}.")
         self.activateWindow()
+
+    def _otevri_pruvodce(self) -> None:
+        """Otevře průvodce rytmem (mimo editor, jen se vzory)."""
+        from gui.pruvodce_dialog import PruvodceRytmuDialog   # bez cyklu importů
+
+        dialog = PruvodceRytmuDialog(
+            self,
+            prehravac=self._prehravac,
+            prehravac_kroku=self._prehravac_kroku,
+            zastav_ukazku=self._zastav_ukazku,
+            oznamovac=self._oznamovac,
+        )
+        dialog.exec()
+        # Návrat fokusu do správce po zavření průvodce.
+        self.activateWindow()
+        self.tlacitko_pruvodce.setFocus()
 
     def _smaz_vybranou(self) -> None:
         id_melodie = self._vybrana_id()

@@ -117,6 +117,9 @@ class HlavniOkno(QMainWindow):
 
         # Stav workeru a zavírání.
         self._worker: Prehravac | None = None
+        self._typ_bezi: str | None = None      # typ právě běžící úlohy
+        # Volitelná reakce průvodce/na dokončení zkušební ukázky.
+        self._ukazka_po_dokonceni = None
         self._vysledek_ulohy: tuple[str, bool] | None = None
         self._fokus_po_prehrani: str | None = None
         self._fokus_pred: QWidget | None = None
@@ -383,10 +386,12 @@ class HlavniOkno(QMainWindow):
 
         self._fokus_pred = QApplication.focusWidget()
         self._fokus_po_prehrani = fokus_po
+        self._ukazka_po_dokonceni = None
         worker = Prehravac(self.motor, Uloha(typ, tuple(kroky), popis))
         worker.dokonceno.connect(self._uloha_dokoncena)
         worker.finished.connect(self._worker_finished)
         self._worker = worker
+        self._typ_bezi = typ
         self._aktualizovat_dostupnost()
         worker.start()
         return True
@@ -406,6 +411,7 @@ class HlavniOkno(QMainWindow):
             return
         worker.deleteLater()
         self._worker = None
+        self._typ_bezi = None
 
         # --- Zavírání aplikace ----------------------------------------
         if self._pozadavek_zavrit:
@@ -444,19 +450,13 @@ class HlavniOkno(QMainWindow):
         self._vysledek_ulohy = None
         self._aktualizovat_dostupnost()
 
-        if preruseno:
+        if typ == "ukazka":
+            # Zkušební ukázka (editor melodií i průvodce rytmem):
+            # nejdřív reakce volajícího (stav v dialogu), pak fokus.
+            self._dokonceni_ukazky(preruseno)
             return
 
-        if typ == "ukazka":
-            # Zkušební ukázka melodie: fokus se NESMÍ přesunout do
-            # hlavního okna — editor melodií musí zůstat otevřený
-            # a zaměřený, dokud se po ukázce vrátí ovládání.
-            modal = QApplication.activeModalWidget()
-            if modal is not None:
-                self._oznam("Zkušební ukázka melodie dohrála.")
-                self._vrat_fokus_do_dialogu(modal)
-                return
-            self._nastav_fokus(self._fokus_po_prehrani)
+        if preruseno:
             return
 
         if typ == "sekvence":
@@ -477,6 +477,32 @@ class HlavniOkno(QMainWindow):
             self._nastav_fokus("nova_hra")
             return
 
+        self._nastav_fokus(self._fokus_po_prehrani)
+
+    def _dokonceni_ukazky(self, preruseno: bool) -> None:
+        """Dokončení zkušební ukázky (editor melodií i průvodce rytmem).
+
+        Nejdřív zavolá odloženou reakci volajícího (stav v dialogu) —
+        chráněně, protože dialog mohl být mezitím zavřený a zničený.
+        Při přerušení se fokus nepřesouvá (stejně jako dřív).
+        """
+        callback = self._ukazka_po_dokonceni
+        self._ukazka_po_dokonceni = None
+        if callback is not None:
+            try:
+                callback()
+            except Exception:   # noqa: BLE001 — zničený dialog nesmí shodit worker
+                pass
+        if preruseno:
+            return
+
+        # Fokus se NESMÍ přesunout do hlavního okna — otevřený dialog
+        # (editor melodií, průvodce) musí zůstat otevřený a zaměřený.
+        modal = QApplication.activeModalWidget()
+        if modal is not None:
+            self._oznam("Zkušební ukázka dohrála.")
+            self._vrat_fokus_do_dialogu(modal)
+            return
         self._nastav_fokus(self._fokus_po_prehrani)
 
     def _nastav_fokus(self, kam: str | None) -> None:
@@ -568,6 +594,45 @@ class HlavniOkno(QMainWindow):
         return self._spust_ulohu("ukazka", kroky,
                                  f"ukázka melodie {melodie.nazev}",
                                  fokus_po="zachovat")
+
+    def prehraj_kroky(
+        self,
+        kroky: list[KrokPrehravani],
+        popis: str,
+        po_dokonceni=None,
+    ) -> bool:
+        """Zkušební přehrání hotových kroků (rytmus, odpočítání, porovnání).
+
+        Používá průvodce rytmem. Stejné podmínky jako
+        ``prehraj_ukazku``: jeden worker současně, hra nesmí být
+        pozastavená, typ „ukazka“ po dokončení vrátí fokus do
+        otevřeného dialogu. ``po_dokonceni`` (volitelné) se zavolá
+        po doběhnutí i po přerušení — hlavní okno ho chrání proti
+        zničenému dialogu.
+        """
+        if not kroky:
+            self._oznam("Není co přehrát — nejdřív vyberte nebo upravte vzor.")
+            return False
+        spusteno = self._spust_ulohu("ukazka", list(kroky), popis,
+                                     fokus_po="zachovat")
+        if spusteno and po_dokonceni is not None:
+            self._ukazka_po_dokonceni = po_dokonceni
+        return spusteno
+
+    def zastav_ukazku(self) -> bool:
+        """Kooperativně přeruší právě běžící zkušební ukázku.
+
+        Na hru (sekvence, výsledkové melodie) sahat NIKDY nemůže —
+        tyto úlohy přerušuje jen zavírání aplikace. Vrací True, pokud
+        bylo co zastavovat.
+        """
+        worker = self._worker
+        if worker is None or worker.isFinished():
+            return False
+        if self._typ_bezi != "ukazka":
+            return False
+        worker.prerus()
+        return True
 
     def _akce_povolena(self) -> bool:
         """Akce z klávesnic zkratek jen když není otevřený modální dialog."""
@@ -685,6 +750,8 @@ class HlavniOkno(QMainWindow):
             nastaveni_hlasu=self.nastaveni_hlasu,
             oznamovac=self.oznamovac,
             prehravac=self.prehraj_ukazku,
+            prehravac_kroku=self.prehraj_kroky,
+            zastav_ukazku=self.zastav_ukazku,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             try:
@@ -853,6 +920,7 @@ class HlavniOkno(QMainWindow):
                 return
             self._worker.deleteLater()
             self._worker = None
+            self._typ_bezi = None
 
         self._zastav_zaviraci_timer()
         # Nic neběží — je bezpečné zavřít.

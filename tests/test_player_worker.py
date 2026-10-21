@@ -12,7 +12,7 @@ import pytest
 
 from melodies import KrokPrehravani
 from player_worker import Prehravac, Uloha
-from sound import ZvukovyMotor, generuj_vlnu
+from sound import ZvukovyMotor, generuj_impuls, generuj_vlnu
 
 import numpy as np
 
@@ -122,3 +122,79 @@ def test_worker_v_tichem_rezimu(qapp):
     assert cekaj_konec(worker, qapp)
     assert worker.wait(3000) is True
     assert vysledky == [("sekvence", False)]
+
+
+# --- Impulzní kroky (průvodce rytmem) -----------------------------------------
+
+def test_krok_bez_parametru_impuls_je_nezmeneny():
+    """Výchozí chování se nesmí změnit — běžné kroky mají impuls=False."""
+    krok = KrokPrehravani(60, 0.05, 0.01)
+    assert krok.impuls is False
+    assert KrokPrehravani(midi=67, zvuk_s=0.2, pauza_s=0.1).impuls is False
+    # Pole navíc nic nemění na ostatních hodnotách.
+    s_impulzem = KrokPrehravani(60, 0.05, 0.01, True)
+    assert s_impulzem.midi == krok.midi
+    assert s_impulzem.zvuk_s == krok.zvuk_s
+    assert s_impulzem.pauza_s == krok.pauza_s
+    assert s_impulzem == KrokPrehravani(60, 0.05, 0.01, impuls=True)
+
+
+def test_worker_prehraje_impulzni_kroky(qapp, motor):
+    kroky = [KrokPrehravani(60, 0.05, 0.01, impuls=True)] * 3
+    worker = Prehravac(motor, Uloha("ukazka", tuple(kroky), "rytmus"))
+    vysledky = []
+    worker.dokonceno.connect(lambda t, p: vysledky.append((t, p)))
+    worker.start()
+    assert cekaj_konec(worker, qapp), "worker s impulzy musí doběhnout"
+    assert worker.wait(3000) is True
+    assert vysledky == [("ukazka", False)]
+
+
+def test_worker_prepina_mezi_impulzem_a_tonem(qapp, motor):
+    """Smíšená sekvence (odpočítání + melodie) projde workerem."""
+    kroky = [KrokPrehravani(60, 0.04, 0.02, impuls=True),
+             KrokPrehravani(64, 0.05, 0.01),
+             KrokPrehravani(67, 0.04, 0.02, impuls=True)]
+    worker = Prehravac(motor, Uloha("ukazka", tuple(kroky), "smíšená"))
+    vysledky = []
+    worker.dokonceno.connect(lambda t, p: vysledky.append((t, p)))
+    worker.start()
+    assert cekaj_konec(worker, qapp)
+    assert worker.wait(3000) is True
+    assert vysledky == [("ukazka", False)]
+
+
+def test_impulz_v_tichem_rezimu_vraci_none():
+    motor = ZvukovyMotor()
+    motor.dostupny = False
+    assert motor.vytvor_impuls(0.08) is None
+
+
+def test_generovani_impulsu():
+    impuls = generuj_impuls(0.08)
+    assert impuls.dtype == np.int16
+    assert impuls.ndim == 2 and impuls.shape[1] == 2
+    assert impuls.shape[0] == int(0.08 * 44100)
+    assert np.max(np.abs(impuls)) > 0
+    with pytest.raises(ValueError):
+        generuj_impuls(0)
+    # Stejný vstup → stejný signál (deterministická cache).
+    assert np.array_equal(generuj_impuls(0.08), impuls)
+
+
+def test_cache_impulsu_je_oddlena_od_tonu():
+    """Impulzy nemění cache běžných tónů (impuls=False zůstává stejné)."""
+    motor = ZvukovyMotor()
+    zvuk_ton = motor.vytvor_zvuk(60, 0.2)
+    zvuk_impuls = motor.vytvor_impuls(0.08)
+    if motor.dostupny:
+        assert (60, 0.2) in motor._cache
+        assert 0.08 in motor._cache_impulsu
+        assert motor.vytvor_zvuk(60, 0.2) is zvuk_ton, \
+            "tón se nesmí přegenerovat kvůli impulzům"
+        assert motor.vytvor_impuls(0.08) is zvuk_impuls
+        motor.uvolni()
+    else:
+        # Tichý režim: obě metody vrací None a nic se neukládá.
+        assert zvuk_ton is None and zvuk_impuls is None
+        assert motor._cache == {} and motor._cache_impulsu == {}

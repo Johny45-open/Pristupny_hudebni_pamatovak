@@ -1,12 +1,17 @@
 """Melodie pro Hudební pamatovák — přednastavené i uživatelské.
 
-Dva zdroje melodií:
+Zdroje melodií (pro hru se používají první dva):
 1. Přednastavené (tyto soubory) — vyvíjí je autor v tónině C,
    automaticky se transponují do zvolené tóniny.
 2. VLASTNÍ (uživatelské) melodie — vytváří je uživatel přímo
    v aplikaci (dialog Správce melodií), ukládají se trvale přes
    ``uloziste`` do JSON souboru. Spravují se funkcemi níže,
    do zdrojového kódu zasahovat nemusí.
+3. VZOROVÉ fanfáry (``VZOROVE_FANFARY``) — originální, volně
+   vymyšlené ukázky pro průvodce rytmem. Nejsou to oficiální
+   znělky žádných klubů, nehrají se ve hře a neukládají se do
+   vlastních melodií; slouží jen jako podklad k úpravě (vždy
+   se z kopie).
 
 Zásady:
 - Melodie se definují ZÁKLADNĚ v tónině C a automaticky se transponují
@@ -165,6 +170,77 @@ PREPOJNA: dict[str, Melodie] = {
 # ---------------------------------------------------------------------------
 
 INDIVIDUALNI_MELODIE: dict[tuple[str, str, str], Melodie] = {}
+
+
+# ---------------------------------------------------------------------------
+# Vzorové fanfáry — podklad průvodce rytmem (NEhrají se ve hře)
+#
+# Tři originální, volně vymyšlené ukázky postupu fanfáry: stoupající
+# dur trojzvuk, rytmický drajv a pomalé zakončení. NEJDE o oficiální
+# znělky žádných hokejových (ani jiných) klubů — konkrétní chráněné
+# melodie se záměrně nekopírují.
+#
+# Slouží výhradně průvodci: ten je vždy upravuje jen přes kopii
+# (``vzor_jako_vlastni`` přidělí nové ID), takže tyto objekty zůstávají
+# beze změny. Do nabídky melodií ve hře (``nabidka_melodii``) nepatří.
+# ---------------------------------------------------------------------------
+
+VZOR_PREFIX_ID = "vzor_"
+
+VZOROVE_FANFARY: dict[str, Melodie] = {
+    "vzor_kratka_vitezna": Melodie(
+        id="vzor_kratka_vitezna",
+        nazev="Krátká vítězná fanfára (vzor)",
+        tony=(Ton("C4", 0.75), Ton("E4", 0.25), Ton("G4", 0.5, 0.5),
+              Ton("C5", 1.0), Ton("E5", 0.5), Ton("C5", 1.5)),
+        tempo_bpm=126.0,
+        druh=DRUH_VITEZNA,
+    ),
+    "vzor_energeticka_golova": Melodie(
+        id="vzor_energeticka_golova",
+        nazev="Energetická gólová fanfára (vzor)",
+        tony=(Ton("C4", 0.5), Ton("C4", 0.5), Ton("E4", 0.5), Ton("G4", 0.5),
+              Ton("C5", 0.75), Ton("G4", 0.25), Ton("C5", 1.5, 0.25)),
+        tempo_bpm=144.0,
+        mezertonova_pauza_s=0.10,
+        druh=DRUH_VITEZNA,
+    ),
+    "vzor_slavnostni_zakonceni": Melodie(
+        id="vzor_slavnostni_zakonceni",
+        nazev="Slavnostní zakončení (vzor)",
+        tony=(Ton("C4", 1.0), Ton("G4", 1.0), Ton("E4", 0.5),
+              Ton("D4", 0.5, 0.5), Ton("C4", 2.0)),
+        tempo_bpm=92.0,
+        mezertonova_pauza_s=0.08,
+        druh=DRUH_VITEZNA,
+    ),
+}
+
+
+def vzorove_fanfary() -> list[Melodie]:
+    """Seznam vzorových fanfár v pořadí definice (pro výběrové pole)."""
+    return list(VZOROVE_FANFARY.values())
+
+
+def vzor(id_vzoru: str) -> Melodie | None:
+    """Vzor podle ID, nebo None (neznámé ID nepadá na jinou melodii)."""
+    return VZOROVE_FANFARY.get(id_vzoru)
+
+
+def vzor_jako_vlastni(id_vzoru: str) -> Melodie:
+    """Vrátí NOVOU kopii vzoru s novým ID — připravenou k úpravě.
+
+    Původní vzor ve ``VZOROVE_FANFARY`` zůstává beze změny;
+    neznámé ID hodí ValueError (česky).
+    """
+    vzor_m = VZOROVE_FANFARY.get(id_vzoru)
+    if vzor_m is None:
+        raise ValueError(f"Neznámý vzor fanfáry: {id_vzoru!r}")
+    return replace(
+        vzor_m,
+        id=nova_id_melodie(),
+        nazev=vzor_m.nazev.removesuffix(" (vzor)") + " (vlastní úprava)",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -560,11 +636,17 @@ def ziskej_melodii(tonina: str, druh: str, id_melodie: str | None = None) -> Vol
 
 @dataclass(frozen=True)
 class KrokPrehravani:
-    """Jeden krok přehrávání: MIDI výška + doby v sekundách."""
+    """Jeden krok přehrávání: MIDI výška + doby v sekundách.
+
+    ``impuls=True`` znamená krátký rytmický klep místo tónu
+    (používá jen průvodce rytmem; běžné melodie mají False,
+    proto se jejich přehrávání nemění).
+    """
 
     midi: int
     zvuk_s: float
     pauza_s: float
+    impuls: bool = False
 
 
 def casovy_plan(melodie: Melodie) -> list[KrokPrehravani]:

@@ -18,6 +18,12 @@ je ovladatelné klávesnicí pro uživatele s odečítačem obrazovky (NVDA, JAW
   přímo v aplikaci (tlačítko „Spravovat vlastní melodie…“ v nastavení),
   bez úpravy zdrojového kódu. Ukládají se trvale do JSON souboru;
   poškozená data aplikaci nerozbijí a přednastavené melodie zůstávají.
+- Průvodce rytmem a fanfárami: dialog s vysvětlením tempa (BPM), délek
+  tónů v dobách a pauz, s přepočtem zadaných dob na sekundy, se třemi
+  krátkými rytmickými příklady a se třemi originálními (volně
+  vymyšlenými) vzory fanfár k poslechu, úpravě a otevření v editoru
+  jako vlastní kopie. Tlačítko „Průvodce rytmem a fanfárami“ je
+  v editoru i ve správci melodií. Viz sekce „Průvodce rytmem a fanfárami“.
 - Hlasový výstup ve třech režimech: vypnutý; jen s potvrzenou aktivní
   čtečkou obrazovky (bez potvrzení aplikace nehlasitě nemluví); i bez
   čtečky (přednost má čtečka, jinak systémový hlas). Viz sekce
@@ -89,12 +95,14 @@ python -m pytest tests\test_vlastni_melodie.py -q
 python -m pytest tests\test_uloziste_melodie.py -q
 python -m pytest tests\test_gui_offscreen.py -q
 python -m pytest tests\test_gui_melodie.py -q
+python -m pytest tests\test_pruvodce.py -q
+python -m pytest tests\test_gui_pruvodce.py -q
 ```
 
 Kontrola syntaxe:
 
 ```powershell
-python -m py_compile theory.py melodies.py game_logic.py stats.py sound.py player_worker.py notify.py uloziste.py main.py gui\main_window.py gui\settings_dialog.py gui\melodie_dialog.py gui\stats_dialog.py
+python -m py_compile theory.py melodies.py game_logic.py stats.py sound.py player_worker.py notify.py uloziste.py pruvodce.py main.py gui\main_window.py gui\settings_dialog.py gui\melodie_dialog.py gui\pruvodce_dialog.py gui\stats_dialog.py
 ```
 
 ## Struktura projektu
@@ -106,11 +114,12 @@ python -m py_compile theory.py melodies.py game_logic.py stats.py sound.py playe
 | `melodies.py` | definice melodií, transpozice, individuální definice, validace, fallback |
 | `game_logic.py` | čistá herní logika (bez Qt a zvuku) |
 | `stats.py` | intervalové a celkové statistiky |
-| `sound.py` | matematické generování tónů, přehrávání přes pygame, tichý režim |
-| `player_worker.py` | QThread worker s kooperativním přerušením přehrávání |
+| `sound.py` | matematické generování tónů, přehrávání přes pygame, tichý režim; krátké rytmické klepy (`generuj_impuls`) s vlastní cache |
+| `player_worker.py` | QThread worker s kooperativním přerušením přehrávání (kroky s `impuls=True` = rytmický klep) |
 | `notify.py` | hlasová oznámení (accessible_output2) + stavový panel jako fallback; režimy hlasu a rozlišení čtečky vs. systémového hlasu |
 | `uloziste.py` | nastavení přes QSettings, nastavení hlasu a bezpečný JSON s vlastními melodiemi |
-| `gui/` | hlavní okno, dialog nastavení, správce a editor vlastních melodií, dialog statistik (PyQt6, česky) |
+| `pruvodce.py` | čistá logika průvodce: přepočet dob na sekundy, rytmické klepání, odpočítání, spojení „před/po“, rytmické příklady |
+| `gui/` | hlavní okno, dialog nastavení, správce a editor vlastních melodií, průvodce rytmem, dialog statistik (PyQt6, česky) |
 | `tests/` | pytest sady (offscreen, bez zvuku) |
 
 ## Vlastní melodie
@@ -168,6 +177,51 @@ Tóny mimo stupnici jsou povoleny jen příznakem `povolit_mimo_stupnici=True`;
 jinak je melodie odmítnuta a použije se bezpečná náhrada. Herní logiku,
 GUI ani zvukový engine kvůli nové melodii měnit nemusíte.
 
+## Průvodce rytmem a fanfárami
+
+Dialog vysvětlí základy rytmu a nabídne vzory fanfár k vyzkoušení.
+Otevře se tlačítkem „Průvodce rytmem a fanfárami“ **v editoru vlastní
+melodie** i **ve správci melodií** (v editoru přináší jeho rozpracovanou
+melodii jako první položku výběru).
+
+**Co dialog obsahuje:**
+
+1. **Vysvětlení tempa a délek** — co je BPM, jak se počítá délka jedné
+   doby (60 ÷ tempo), jak se zapisuje délka tónu a pauza v dobách a že
+   se mezertonová pauza přičítá v sekundách nezávisle na tempu. Pole
+   tempo / délka / pauza / mezertonová pauza lze zadat přímo z
+   klávesnice a výsledek se přepočítává živě („1 doba = … s, zadaný
+   tón = … s“).
+2. **Rytmické příklady** — tři krátké ukázky (stejné čtvrtky, osminky a
+   čtvrtky, vítězný rytmus 3 + 3 + 2) s českým popisem a vypočtenou
+   délkou v sekundách.
+3. **Vzor fanfáry k úpravě** — výběr ze **tří originálních, volně
+   vymyšlených** ukázek (nejde o oficiální znělky žádných hokejových
+   ani jiných klubů): krátká vítězná, energetická gólová a slavnostní
+   zakončení. Každý vzor má tóny, tempo, délky a pauzy; seznam tónů
+   jde upravit poli délka / pauza + „Změnit vybraný tón“.
+   **Vzory se upravují vždy přes kopii** — `VZOROVE_FANFARY` zůstávají
+   beze změny a „Otevřít vzor v editoru…“ vytvoří vždy novou kopii
+   s novým ID a názvem „… (vlastní úprava)“.
+4. **Poslech a porovnání** — „Přehrát jen rytmus“ (krátké klepy místo
+   tónů), „Přehrát rytmus s odpočítáním“ (4 zvukové údery po jedné
+   době tempa; text „raz, dva, tři, čtyři“ jen vysvětluje pořadí,
+   aplikace ho nahlas nevyslovuje), „Přehrát melodii“, „Zastavit
+   přehrávání“, „Zaznamenat současný stav“ a „Porovnat rytmus před a
+   po“ (oba rytmy za sebou v jednom přehrávání s pauzou 1,5 s mezi
+   nimi). Při změně vzoru se zaznamenaný stav „před“ automaticky
+   obnoví na nově načtený vzor.
+
+**Jak je to se časem:** rytmické klepání vychází z přesného
+`casovy_plan()` — pro původní krok `D` (délka zvuku) + `P` (pauza) a
+impuls `I` (0,08 s, zkrácený na `D`, je-li kratší) je pauza po impulsu
+`max(0, D + P − I)`, takže nástupy i celková délka zůstávají stejné
+jako u původní melodie a mezitónová pauza se nezapočítá dvakrát.
+
+Přehrávání jde přes worker hlavního okna (typ „ukazka“) — GUI se
+neblokuje, fokus se po ukázce vrací do průvodce a zavření průvodce
+během přehrávání ho kooperativně přeruší bez zničení dialogu.
+
 ## Hlasový výstup — režimy
 
 Režim se volí v dialogu Nastavení (sekce „Hlasový výstup“) a ukládá se
@@ -206,10 +260,20 @@ fungování bez zvukového zařízení. Dále sekce hlasového výstupu v nastav
 melodií, že po dokončení zkušební ukázky zůstane editor otevřený s fokusem
 uvnitř něj a že smazání právě vybrané melodie aktualizuje oba výběry,
 uložené hodnoty i interní reference (bez změny nesouvisejícího nastavení).
+U průvodce rytmem dále: přístupné názvy a popisy všech prvků, buddy
+popisky, žádné posuvníky, pořadí Tab přes `nextInFocusChain`, přepočet
+dob na sekundy podle tempa, ochrana `VZOROVE_FANFARY` (úpravy i uložení
+kopie s novým ID), návrat fokusu po zavření editoru do průvodce i po
+průvodci do správce a do editoru, přehrání bez blokování GUI s návratem
+fokusu, kooperativní zastavení při zavření během přehrávání, porovnání
+„před/po“ v jediném workeru a to, že ukázky nemění herní logiku ani
+chování kroků s `impuls=False`.
 
 **Není fyzicky ověřeno:** průběh s reálně spuštěným NVDA nebo JAWS
-(včetně chování režimu `jen_odecitas` s reálnou čtečkou) a reálný
-hlasový výstup. Testy hlasových režimů pracují s věrnými atrapami
+(včetně chování režimu `jen_odecitas` s reálnou čtečkou), reálný
+hlasový výstup **ani ruční průchod průvodcem rytmem** (kroky 11–12
+výše zatím nebyly provedeny — jsou to kandidáti na ruční test).
+Testy hlasových režimů pracují s věrnými atrapami
 výstupů `accessible_output2`, ne s živou čtečkou. Přítomnost
 `setAccessibleName()` sama o sobě kompatibilitu
 s odečítačem negarantuje. Manuální postup testu s NVDA:
@@ -233,6 +297,14 @@ s odečítačem negarantuje. Manuální postup testu s NVDA:
    protože text je i na panelu).
 10. Spusťte přehrávání a zkuste zavřít okno — okno se nesmí zavřít, dokud
     zvuk doběhne; ovládání bude dočasně vypnuté.
+11. Nastavení → Správce vlastních melodií → „Průvodce rytmem“: NVDA by
+    měl číst nadpis, vysvětlení tempa a pole tempo; Tab vede přes
+    rytmické příklady, výběr vzoru, seznam tónů a tlačítka poslechu;
+    „Přehrát jen rytmus“ spustí ukázku a po jejím skončení se fokus
+    vrátí na tlačítko; „Zavřít“ se stejnou ukázku přeruší a fokus se
+    vrátí do správce.
+12. Týž průvodce otevřete i z editoru melodie a po jeho zavření se fokus
+    musí vrátit na tlačítko průvodce v editoru.
 
 S JAWS postupujte stejně (JAWS čte stejné standardní názvy přístupnosti).
 
