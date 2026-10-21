@@ -1,0 +1,303 @@
+"""Herní logika Hudebního pamatováku.
+
+Čistý Python bez Qt a zvuku — testovatelný samostatně.
+
+Pravidla kola (schválená specifikace):
+- aplikace vygeneruje sekvenci stupňů zvolené durové stupnice,
+- vstupy hráče se vyhodnocují pouze ve stavu ``HRAC_VSTUPUJE``
+  (tzn. nikdy během přehrávání — to logika odmítne),
+- každý přijatý vstup se započte právě jednou,
+- chybný vstup spotřebí právě jeden pokus, přehraje se smutná melodie
+  a při zbývajících pokusech se hráč vrátí na začátek celé sekvence,
+- vyčerpání všech pokusů = neúspěšné kolo,
+- úplné zopakování sekvence = úspěšné kolo,
+- opakované přehrání sekvence je pouze zvukový výstup a do logiky
+  vůbec nevstupuje (nemění skóre ani pokusy).
+"""
+
+from __future__ import annotations
+
+import random
+from dataclasses import dataclass
+from enum import Enum
+
+import theory
+from stats import SpravceStatistik, VysledekIntervalu
+
+
+def _pocet_pokusu_text(n: int) -> str:
+    """Český text pro počet pokusů (1 pokus, 2–4 pokusy, 5+ pokusů)."""
+    if n == 1:
+        return "1 pokus"
+    if 2 <= n <= 4:
+        return f"{n} pokusy"
+    return f"{n} pokusů"
+
+
+def _pocet_tonu_text(n: int) -> str:
+    """Český text pro počet zbývajících tónů."""
+    if n == 1:
+        return "1 tón"
+    if 2 <= n <= 4:
+        return f"{n} tóny"
+    return f"{n} tónů"
+
+
+class StavKola(Enum):
+    CEKA_NA_PREHRANI = "ceka_na_prehrani"     # sekvence se má / právě hraje
+    HRAC_VSTUPUJE = "hrac_vstupuje"           # hráč může zadávat tóny
+    DOKONCENO_USPECH = "dokonceno_uspech"
+    DOKONCENO_NEUSPECH = "dokonceno_neuspech"
+
+
+@dataclass
+class VysledekVstupu:
+    """Výsledek vyhodnocení jednoho vstupu hráče."""
+
+    prijat: bool                    # False = vstup byl odmítnut (neplatný stav)
+    spravne: bool | None
+    ocekavany_stupen: int | None
+    zadany_stupen: int | None
+    pokusy_zbyva: int
+    pozice: int
+    delka: int
+    kolo_dokonceno: bool            # True = kolo právě skončilo
+    uspech: bool | None             # výsledek kola, jen pokud kolo_dokonceno
+    hlaska: str
+    interval: VysledekIntervalu | None = None   # snímek pro dialog statistik
+
+
+@dataclass
+class NastaveniHry:
+    """Nastavení platné pro další kola (mění se v nastavení hry)."""
+
+    tonina: str = "C"
+    oktava: int = 4
+    delka_sekvence: int = 4
+    pocet_pokusu: int = 3
+    interval_statistik: int = 5
+    id_smutne_melodie: str = "kratka_sestupna"
+    id_vitezne_melodie: str = "kratka_fanfara"
+
+    def over(self) -> None:
+        theory.over_toninu(self.tonina)
+        if self.oktava not in (3, 4, 5):
+            raise ValueError(f"Októva musí být 3, 4 nebo 5, je {self.oktava}")
+        if not 2 <= self.delka_sekvence <= 12:
+            raise ValueError(
+                f"Délka sekvence musí být 2–12, je {self.delka_sekvence}")
+        if not 1 <= self.pocet_pokusu <= 10:
+            raise ValueError(
+                f"Počet pokusů musí být 1–10, je {self.pocet_pokusu}")
+        if self.interval_statistik < 1:
+            raise ValueError("Interval statistik musí být kladné celé číslo")
+
+
+class HerniLogika:
+    """Stroj stavů kola + napojení na statistiky."""
+
+    def __init__(
+        self,
+        nastaveni: NastaveniHry | None = None,
+        spravce: SpravceStatistik | None = None,
+        rng: random.Random | None = None,
+    ) -> None:
+        self.nastaveni = nastaveni or NastaveniHry()
+        self.nastaveni.over()
+        self.spravce = spravce or SpravceStatistik(
+            interval_cil=self.nastaveni.interval_statistik)
+        self.rng = rng or random.Random()
+
+        self.stav: StavKola = StavKola.CEKA_NA_PREHRANI
+        self.sekvence: list[int] = []      # stupně 0-6
+        self.pozice: int = 0               # kolikátý tón hráč právě opakuje
+        self.pokusy_zbyva: int = 0
+        self.pokusy_celkem: int = 0
+        self.kolo_cislo: int = 0           # dokončená kola v této hře
+
+    # ------------------------------------------------------------------
+    # Nastavení a nová hra
+    # ------------------------------------------------------------------
+
+    def zmenit_nastaveni(self, **zmeny) -> None:
+        """Aplikuje nastavení pro DALŠÍ kola (současné kolo neovlivní)."""
+        nove = NastaveniHry(**{**self.nastaveni.__dict__, **zmeny})
+        nove.over()
+        self.nastaveni = nove
+        if "interval_statistik" in zmeny:
+            self.spravce.zmenit_cil_intervalu(nove.interval_statistik)
+
+    def nova_hra(self) -> None:
+        """Bezpečně resetuje stav hry (kolo, pokusy, pozici).
+
+        Nastavení ani statistiky (celkové i intervalové) nemění.
+        """
+        self.stav = StavKola.CEKA_NA_PREHRANI
+        self.sekvence = []
+        self.pozice = 0
+        self.pokusy_zbyva = 0
+        self.pokusy_celkem = 0
+        self.kolo_cislo = 0
+
+    # ------------------------------------------------------------------
+    # Kolo
+    # ------------------------------------------------------------------
+
+    def zahaj_kolo(self) -> list[int]:
+        """Vygeneruje novou náhodnou sekvenci a připraví kolo.
+
+        Vrací sekvenci stupňů (0-6). Do té doby, než GUI zavolá
+        ``sekvence_prehrana()``, jsou vstupy hráče odmítány.
+        """
+        n = self.nastaveni.delka_sekvence
+        self.sekvence = [self.rng.randrange(7) for _ in range(n)]
+        self.pozice = 0
+        self.pokusy_celkem = self.nastaveni.pocet_pokusu
+        self.pokusy_zbyva = self.pokusy_celkem
+        self.stav = StavKola.CEKA_NA_PREHRANI
+        return list(self.sekvence)
+
+    def sekvence_prehrana(self) -> bool:
+        """Označí, že sekvence dohrála a hráč může zadávat tóny.
+
+        Volá se jen po dokončeném přehrání (ne po opakovaném přehrání
+        uprostřed kola — to stav nemění).
+        """
+        if self.stav != StavKola.CEKA_NA_PREHRANI:
+            return False
+        self.stav = StavKola.HRAC_VSTUPUJE
+        return True
+
+    def midi_sekvence(self) -> list[int]:
+        """Sekvence převedená na MIDI výšky podle tóniny a oktávy."""
+        stup = theory.stupnice(self.nastaveni.tonina, self.nastaveni.oktava)
+        return [stup[s][1] for s in self.sekvence]
+
+    def tlacitka(self) -> list[tuple[str, int]]:
+        """Sedm tlačítek: [(přístupný název, MIDI), ...]."""
+        return [
+            theory.nazev_pro_tlacitko(
+                self.nastaveni.tonina, s, self.nastaveni.oktava)
+            for s in range(7)
+        ]
+
+    def ocekavany_ton(self) -> tuple[str, int] | None:
+        """(název, MIDI) tónu, který hráč právě má zopakovat."""
+        if self.stav != StavKola.HRAC_VSTUPUJE:
+            return None
+        stup = theory.stupnice(self.nastaveni.tonina, self.nastaveni.oktava)
+        nazev, midi = stup[self.sekvence[self.pozice]]
+        return f"{nazev}{midi // 12 - 1}", midi
+
+    # ------------------------------------------------------------------
+    # Vstup hráče
+    # ------------------------------------------------------------------
+
+    def zpracuj_vstup(self, stupen: int) -> VysledekVstupu:
+        """Vyhodnotí právě jeden vstup hráče (stupeň 0-6).
+
+        Mimo stav ``HRAC_VSTUPUJE`` je vstup odmítnut a nezapočte se.
+        """
+        def prazdny(hlaska: str) -> VysledekVstupu:
+            return VysledekVstupu(
+                prijat=False, spravne=None, ocekavany_stupen=None,
+                zadany_stupen=None, pokusy_zbyva=self.pokusy_zbyva,
+                pozice=self.pozice, delka=len(self.sekvence),
+                kolo_dokonceno=False, uspech=None, hlaska=hlaska,
+            )
+
+        if not 0 <= stupen <= 6:
+            return prazdny(f"Neplatný stupeň: {stupen}")
+        if self.stav != StavKola.HRAC_VSTUPUJE:
+            return prazdny("Teď se nehraje — vstup nebyl přijat.")
+
+        ocekavany = self.sekvence[self.pozice]
+        delka = len(self.sekvence)
+
+        if stupen == ocekavany:
+            # Správný tón — započte se právě jednou.
+            self.spravce.zaznamenej_spravny_ton()
+            self.pozice += 1
+            if self.pozice >= delka:
+                # Úspěšné dokončení celé sekvence.
+                self.stav = StavKola.DOKONCENO_USPECH
+                self.kolo_cislo += 1
+                interval = self.spravce.kolo_dokonceno(uspech=True)
+                return VysledekVstupu(
+                    prijat=True, spravne=True,
+                    ocekavany_stupen=ocekavany, zadany_stupen=stupen,
+                    pokusy_zbyva=self.pokusy_zbyva, pozice=self.pozice,
+                    delka=delka, kolo_dokonceno=True, uspech=True,
+                    hlaska="Gratuluji, sekvence je správně zopakovaná.",
+                    interval=interval,
+                )
+            zbyva = delka - self.pozice
+            return VysledekVstupu(
+                prijat=True, spravne=True, ocekavany_stupen=ocekavany,
+                zadany_stupen=stupen, pokusy_zbyva=self.pokusy_zbyva,
+                pozice=self.pozice, delka=delka, kolo_dokonceno=False,
+                uspech=None,
+                hlaska=(f"Správně. Zbývá zopakovat {_pocet_tonu_text(zbyva)}."),
+            )
+
+        # Chybný tón — započte se právě jednou a spotřebuje jeden pokus.
+        self.spravce.zaznamenej_chybny_ton()
+        self.pokusy_zbyva -= 1
+        if self.pokusy_zbyva <= 0:
+            self.stav = StavKola.DOKONCENO_NEUSPECH
+            self.kolo_cislo += 1
+            interval = self.spravce.kolo_dokonceno(uspech=False)
+            return VysledekVstupu(
+                prijat=True, spravne=False, ocekavany_stupen=ocekavany,
+                zadany_stupen=stupen, pokusy_zbyva=0, pozice=self.pozice,
+                delka=delka, kolo_dokonceno=True, uspech=False,
+                hlaska=("Vyčerpány všechny pokusy, kolo je neúspěšné."),
+                interval=interval,
+            )
+
+        # Zbývají pokusy → hráč začíná znovu od začátku sekvence.
+        self.pozice = 0
+        spravne = self.spravce.celkem.spravne_tony
+        chybne = self.spravce.celkem.chybne_tony
+        return VysledekVstupu(
+            prijat=True, spravne=False, ocekavany_stupen=ocekavany,
+            zadany_stupen=stupen, pokusy_zbyva=self.pokusy_zbyva,
+            pozice=self.pozice, delka=delka, kolo_dokonceno=False,
+            uspech=None,
+            hlaska=(f"Chyba, správný tón byl očekáván jiný. "
+                    f"Zbývá {_pocet_pokusu_text(self.pokusy_zbyva)}, "
+                    f"začínáte znovu od začátku. "
+                    f"Celkem správně {spravne}, chybně {chybne}."),
+        )
+
+    def zopovat_kolo(self) -> bool:
+        """Restartuje současné kolo: stejná sekvence, plné pokusy.
+
+        Statistiky se nemění (kolo nebylo dokončeno). Vrátí True,
+        pokud restart proběhl (kolo musí být rozehrané nebo právě
+        dokončené).
+        """
+        if not self.sekvence:
+            return False
+        if self.stav == StavKola.CEKA_NA_PREHRANI:
+            return False   # sekvence právě hraje — nic nerestartujeme
+        self.pozice = 0
+        self.pokusy_zbyva = self.pokusy_celkem
+        self.stav = StavKola.CEKA_NA_PREHRANI
+        return True
+
+    # ------------------------------------------------------------------
+    # Popisy pro GUI
+    # ------------------------------------------------------------------
+
+    def popis_stavu(self) -> str:
+        if self.stav == StavKola.DOKONCENO_USPECH:
+            return "Kolo dokončeno úspěšně."
+        if self.stav == StavKola.DOKONCENO_NEUSPECH:
+            return "Kolo dokončeno neúspěšně, vyčerpány pokusy."
+        if not self.sekvence:
+            return "Není rozehrané kolo. Spusťte novou hru."
+        if self.stav == StavKola.CEKA_NA_PREHRANI:
+            return "Přehrává se nebo se připravuje sekvence tónů."
+        return (f"Pozice {self.pozice + 1} z {len(self.sekvence)}, "
+                f"zbývá {_pocet_pokusu_text(self.pokusy_zbyva)}.")

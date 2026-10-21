@@ -1,0 +1,6 @@
+# Skutečně používané závislosti projektu Hudební pamatovák.
+PyQt6>=6.5
+pygame>=2.5
+numpy>=1.24
+accessible-output2>=0.17
+pytest>=8.0
