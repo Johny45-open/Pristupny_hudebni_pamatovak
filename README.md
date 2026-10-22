@@ -251,11 +251,14 @@ podle zvoleného režimu a přepíše jen hlášení v dialogu, ne hlášení he
 
 **Ověřeno automaticky (offscreen testy):** přístupné názvy a popisy všech
 ovládacích prvků (žádné generické „Tlačítko 1“), propojení popisků přes
-`setBuddy`, čitelnost textu chyby a zbývajících pokusů na stavovém panelu
-(včetně přístupného názvu panelu), kontext kláves 1–7 (neaktivní v modálních
-dialozích a číselných polích), návrat fokusu po kole a po zavření dialogů,
-bezpečné odložení zavírání, skutečné ukončení workeru (`wait()` + `isFinished()`),
-fungování bez zvukového zařízení. Dále sekce hlasového výstupu v nastavení
+`setBuddy`, u dialogu statistik že přístupné názvy obou výsledkových
+labelů i popisu období **obsahují celý text včetně čísel** (viz „Zápis
+statistik pro čtečku“), čitelnost textu chyby a zbývajících pokusů na
+stavovém panelu (včetně přístupného názvu panelu), kontext kláves 1–7
+(neaktivní v modálních dialozích a číselných polích), návrat fokusu po
+kole a po zavření dialogů, bezpečné odložení zavírání, skutečné
+ukončení workeru (`wait()` + `isFinished()`), fungování bez zvukového
+zařízení. Dále sekce hlasového výstupu v nastavení
 (tři režimy, stav, zkušební hláška), přístupnost správce a editoru vlastních
 melodií, že po dokončení zkušební ukázky zůstane editor otevřený s fokusem
 uvnitř něj a že smazání právě vybrané melodie aktualizuje oba výběry,
@@ -276,7 +279,21 @@ výše zatím nebyly provedeny — jsou to kandidáti na ruční test).
 Testy hlasových režimů pracují s věrnými atrapami
 výstupů `accessible_output2`, ne s živou čtečkou. Přítomnost
 `setAccessibleName()` sama o sobě kompatibilitu
-s odečítačem negarantuje. Manuální postup testu s NVDA:
+s odečítačem negarantuje.
+
+**Zápis statistik pro čtečku:** Qt u `QLabel` přes UIA nenabízí textový
+ani hodnotový vzor — jediné, co má čtečka k dispozici, je `Name`.
+Krátce nastavený `setAccessibleName("Výsledky intervalu")` by tedy čísla
+před čtečkou **skryl** (ověřeno na reálném okně přes UI Automation:
+jednotlivé labely dialogu vydávaly jen nadpis, žádné hodnoty). Proto
+`gui/stats_dialog.py` používá helper `_nastav_label()`, který nastaví
+text i přístupný název najednou — `Name` labelu tak zní
+„Výsledky intervalu: Správně zahrané tóny: 7. …“ a obsahuje celý obsah,
+ve stejném duchu jako stavový panel. Offscreen test
+`test_dialog_statistik_pristupne_nazvy_obsahuji_hodnoty` hlídá, že se
+text viditelný v prvku a text čtený čtečkou nerozejdou.
+
+Manuální postup testu s NVDA:
 
 1. Spusťte NVDA, pak `python main.py`.
 2. NVDA by měl při otevření okna přečíst název aplikace a stavový panel.
@@ -287,8 +304,10 @@ s odečítačem negarantuje. Manuální postup testu s NVDA:
    zbývajících pokusů; přehraje se smutná melodie; informace zůstane čitelná
    i na panelu (přepněte do režimu procházení a přečtěte si panel).
 6. Vyčerpejte pokusy — kolo skončí neúspěchem; po melodii se (pokud je
-   vyčerpán interval) otevře dialog statistik; NVDA přečte výsledky a po
-   Zavřít se fokus vrátí na tlačítko Statistiky.
+   vyčerpán interval) otevře dialog statistik; NVDA při fokusu na
+   výsledcích přečte **i konkrétní čísla** („Výsledky intervalu:
+   Správně zahrané tóny: …“), ne jen nadpis, a po Zavřít se fokus vrátí
+   na tlačítko Statistiky.
 7. Opakujte kolo správně — po sekvenci fokus přejde na první tón, po
    vítězné melodii na Novou hru; uslyšíte vítěznou melodii.
 8. F5 uprostřed kola — sekvence se znovu přehraje; skóre i pokusy zůstanou
@@ -324,3 +343,8 @@ S JAWS postupujte stejně (JAWS čte stejné standardní názvy přístupnosti).
 - Při testech s hlasem může `accessible_output2` vyvolat u SAPI tichou
   systémovou výjimku („Windows fatal exception 0xe0000002“) — je to
   předexistující jev knihovny/SAPI, na výsledcích testů se neprojevuje.
+- Label „Průběh hry“ v hlavním okně má statický přístupný název, takže
+  pozice v sekvenci a zbývající pokusy se z něj přes čtečku nepřečtou
+  (stejná příčina jako u statistik, opraveno zatím jen u dialogu
+  statistik). Průběh hry je ale vždy čitelný na stavovém panelu a v
+  hlášeních po každém tónu.

@@ -22,6 +22,18 @@ def _text_statistik(stat) -> str:
     )
 
 
+def _nastav_label(label: QLabel, popisek: str, text: str) -> None:
+    """Nastaví text i přístupný název prvku najednou.
+
+    Čtečka obrazovky čte u ``QLabel`` přes UIA jen ``Name`` (Qt pro
+    popisky nenabízí textový ani hodnotový vzor). Krátký ``accessibleName``
+    by tedy obsah před čtečkou schoval — proto se do něj vkládá celý
+    text, stejně jako to dělá stavový panel.
+    """
+    label.setText(text)
+    label.setAccessibleName(f"{popisek}: {text}")
+
+
 class StatsDialog(QDialog):
     """Zobrazí výsledky za aktuální interval i celkové od spuštění."""
 
@@ -40,18 +52,19 @@ class StatsDialog(QDialog):
         skupina_int.setAccessibleName(
             "Statistiky za aktuální statistický interval")
         lay_int = QVBoxLayout(skupina_int)
-        text_obdobi = QLabel(obdobi, skupina_int)
-        text_obdobi.setWordWrap(True)
-        text_obdobi.setTextInteractionFlags(
+        self._label_obdobi = QLabel("", skupina_int)
+        self._label_obdobi.setWordWrap(True)
+        self._label_obdobi.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
-        text_obdobi.setAccessibleName("Období intervalu")
-        lay_int.addWidget(text_obdobi)
-        self._label_interval = QLabel(_text_statistik(interval), skupina_int)
+        _nastav_label(self._label_obdobi, "Období intervalu", obdobi)
+        lay_int.addWidget(self._label_obdobi)
+        self._label_interval = QLabel("", skupina_int)
         self._label_interval.setWordWrap(True)
         self._label_interval.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
         self._label_interval.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._label_interval.setAccessibleName("Výsledky intervalu")
+        _nastav_label(self._label_interval, "Výsledky intervalu",
+                      _text_statistik(interval))
         lay_int.addWidget(self._label_interval)
         hlavni.addWidget(skupina_int)
 
@@ -59,12 +72,13 @@ class StatsDialog(QDialog):
         skupina_celk = QGroupBox("Celkové statistiky", self)
         skupina_celk.setAccessibleName("Celkové statistiky od spuštění hry")
         lay_celk = QVBoxLayout(skupina_celk)
-        self._label_celkem = QLabel(_text_statistik(celkem), skupina_celk)
+        self._label_celkem = QLabel("", skupina_celk)
         self._label_celkem.setWordWrap(True)
         self._label_celkem.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse)
         self._label_celkem.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self._label_celkem.setAccessibleName("Celkové výsledky")
+        _nastav_label(self._label_celkem, "Celkové výsledky",
+                      _text_statistik(celkem))
         lay_celk.addWidget(self._label_celkem)
         hlavni.addWidget(skupina_celk)
 

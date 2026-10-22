@@ -174,8 +174,35 @@ def test_dialog_statistik_zobrazi_hodnoty(qapp):
         "Období: testovací.")
     assert "7" in dialog.text_intervalu and "3" in dialog.text_intervalu
     assert "20" in dialog.text_celkem
-    assert dialog._label_interval.accessibleName() == "Výsledky intervalu"
-    assert dialog._label_celkem.accessibleName() == "Celkové výsledky"
+    # Přístupné názvy s obsahem hlídá test
+    # test_dialog_statistik_pristupne_nazvy_obsahuji_hodnoty.
+
+
+def test_dialog_statistik_pristupne_nazvy_obsahuji_hodnoty(qapp):
+    """Čtečka čte z QLabel přes UIA jen Name — musí obsahovat i čísla."""
+    dialog = StatsDialog(
+        Statistiky(spravne_tony=7, chybne_tony=3,
+                   uspesna_kola=2, neuspesna_kola=1),
+        Statistiky(spravne_tony=20, chybne_tony=5,
+                   uspesna_kola=6, neuspesna_kola=2),
+        "Období: právě dokončený interval.")
+
+    nazev_int = dialog._label_interval.accessibleName()
+    assert nazev_int.startswith("Výsledky intervalu: ")
+    assert "7" in nazev_int and "3" in nazev_int
+    assert "20" not in nazev_int, "cizí hodnoty se nesmí míchat do intervalu"
+
+    nazev_celk = dialog._label_celkem.accessibleName()
+    assert nazev_celk.startswith("Celkové výsledky: ")
+    assert "20" in nazev_celk
+
+    nazev_obdobi = dialog._label_obdobi.accessibleName()
+    assert nazev_obdobi.startswith("Období intervalu: ")
+    assert "právě dokončený interval" in nazev_obdobi
+
+    # Text viditelný v prvku a text čtený čtečkou se nesmí rozejít.
+    assert dialog.text_intervalu in nazev_int
+    assert dialog.text_celkem in nazev_celk
 
 
 # ==================================================================
