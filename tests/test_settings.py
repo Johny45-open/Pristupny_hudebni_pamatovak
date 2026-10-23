@@ -16,13 +16,16 @@ def test_kolo_zapis_a_cteni(tmp_path):
     s = _nastaveni_ini(tmp_path)
     nastaveni = NastaveniHry(
         tonina="Fis", oktava=3, delka_sekvence=7, pocet_pokusu=5,
-        interval_statistik=9, id_smutne_melodie="dlouhy_smutny",
+        interval_statistik=9, odmena_po_kolech=3, absolutni_sluch=True,
+        id_smutne_melodie="dlouhy_smutny",
         id_vitezne_melodie="slavnostni",
     )
     uloziste.uloz_nastaveni(nastaveni, s)
     nacteno = uloziste.nacti_nastaveni(s)
     assert nacteno == nastaveni
     assert nacteno.tonina == "Fis"
+    assert nacteno.odmena_po_kolech == 3
+    assert nacteno.absolutni_sluch is True
     assert nacteno.id_vitezne_melodie == "slavnostni"
 
 

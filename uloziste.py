@@ -71,6 +71,8 @@ def uloz_nastaveni(nastaveni: NastaveniHry,
     s.setValue("delka_sekvence", nastaveni.delka_sekvence)
     s.setValue("pocet_pokusu", nastaveni.pocet_pokusu)
     s.setValue("interval_statistik", nastaveni.interval_statistik)
+    s.setValue("odmena_po_kolech", nastaveni.odmena_po_kolech)
+    s.setValue("absolutni_sluch", nastaveni.absolutni_sluch)
     s.setValue("id_smutne_melodie", nastaveni.id_smutne_melodie)
     s.setValue("id_vitezne_melodie", nastaveni.id_vitezne_melodie)
     s.sync()
@@ -87,6 +89,17 @@ def nacti_nastaveni(nastaveni_qsettings: QSettings | None = None) -> NastaveniHr
         except (TypeError, ValueError):
             return vychozi_hodnota
 
+    def _bool(klic: str, vychozi_hodnota: bool) -> bool:
+        val = s.value(klic, vychozi_hodnota)
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.lower() in ("true", "1", "yes", "t")
+        try:
+            return bool(int(val))
+        except (TypeError, ValueError):
+            return vychozi_hodnota
+
     kandidat = NastaveniHry(
         tonina=str(s.value("tonina", vychozi.tonina)),
         oktava=_int("oktava", vychozi.oktava),
@@ -94,6 +107,8 @@ def nacti_nastaveni(nastaveni_qsettings: QSettings | None = None) -> NastaveniHr
         pocet_pokusu=_int("pocet_pokusu", vychozi.pocet_pokusu),
         interval_statistik=_int("interval_statistik",
                                 vychozi.interval_statistik),
+        odmena_po_kolech=_int("odmena_po_kolech", vychozi.odmena_po_kolech),
+        absolutni_sluch=_bool("absolutni_sluch", vychozi.absolutni_sluch),
         id_smutne_melodie=str(s.value("id_smutne_melodie",
                                       vychozi.id_smutne_melodie)),
         id_vitezne_melodie=str(s.value("id_vitezne_melodie",

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -117,6 +118,25 @@ class NastaveniDialog(QDialog):
         pop_interval = QLabel("Interval statistik:", self)
         pop_interval.setBuddy(self.interval)
         form.addRow(pop_interval, self.interval)
+
+        # --- Odměna po úspěšných kolech ---------------------------------
+        self.odmena_kola = QSpinBox(self)
+        self.odmena_kola.setRange(1, 50)
+        self.odmena_kola.setValue(nastaveni.odmena_po_kolech)
+        self.odmena_kola.setAccessibleName("Odměna po úspěšných kolech")
+        self.odmena_kola.setAccessibleDescription(
+            "Po kolika úspěšných kolech v řadě (streak) se přehraje odměna.")
+        pop_odmena = QLabel("Odměna po úspěšných kolech:", self)
+        pop_odmena.setBuddy(self.odmena_kola)
+        form.addRow(pop_odmena, self.odmena_kola)
+
+        # --- Absolutní hudební sluch ------------------------------------
+        self.absolutni_sluch = QCheckBox("Zapnout absolutní hudební sluch", self)
+        self.absolutni_sluch.setChecked(nastaveni.absolutni_sluch)
+        self.absolutni_sluch.setAccessibleName("Absolutní hudební sluch")
+        self.absolutni_sluch.setAccessibleDescription(
+            "Pokud je zapnuto a zvládnete všechna kola v intervalu bez chyb, hra se stane těžší.")
+        form.addRow("", self.absolutni_sluch)
 
         # --- Smutná melodie ---------------------------------------------
         self.smutna = QComboBox(self)
@@ -234,7 +254,9 @@ class NastaveniDialog(QDialog):
         self.setTabOrder(self.oktava, self.pokusy)
         self.setTabOrder(self.pokusy, self.delka)
         self.setTabOrder(self.delka, self.interval)
-        self.setTabOrder(self.interval, self.smutna)
+        self.setTabOrder(self.interval, self.odmena_kola)
+        self.setTabOrder(self.odmena_kola, self.absolutni_sluch)
+        self.setTabOrder(self.absolutni_sluch, self.smutna)
         self.setTabOrder(self.smutna, self.vitezna)
         self.setTabOrder(self.vitezna, self.tlacitko_spravce)
         self.setTabOrder(self.tlacitko_spravce, self.rezim_hlasu)
@@ -346,6 +368,8 @@ class NastaveniDialog(QDialog):
             "pocet_pokusu": int(self.pokusy.value()),
             "delka_sekvence": int(self.delka.value()),
             "interval_statistik": int(self.interval.value()),
+            "odmena_po_kolech": int(self.odmena_kola.value()),
+            "absolutni_sluch": bool(self.absolutni_sluch.isChecked()),
             "id_smutne_melodie": self.smutna.currentData(),
             "id_vitezne_melodie": self.vitezna.currentData(),
         }
@@ -356,6 +380,8 @@ class NastaveniDialog(QDialog):
             raise ValueError("Počet pokusů musí být 1–10.")
         if hodnoty["interval_statistik"] < 1:
             raise ValueError("Interval statistik musí být kladné celé číslo.")
+        if hodnoty["odmena_po_kolech"] < 1:
+            raise ValueError("Odměna po úspěšných kolech musí být kladné celé číslo.")
         return hodnoty
 
     def hodnoty_hlasu(self) -> notify.NastaveniHlasu:

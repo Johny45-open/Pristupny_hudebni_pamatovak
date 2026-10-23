@@ -295,3 +295,45 @@ def test_zmenit_nastaveni_validuje():
         log.zmenit_nastaveni(delka_sekvence=99)
     with pytest.raises(ValueError):
         log.zmenit_nastaveni(interval_statistik=0)
+
+
+def test_streak_odmena():
+    log = vytvor(odmena_po_kolech=2, delka_sekvence=2)
+    # Kolo 1
+    log.zahaj_kolo()
+    log.sekvence_prehrana()
+    log.zpracuj_vstup(log.sekvence[0])
+    v1 = log.zpracuj_vstup(log.sekvence[1])
+    assert v1.kolo_dokonceno and v1.uspech
+    assert not v1.odmena_dosažena
+
+    # Kolo 2 (streak 2 == odmena_po_kolech)
+    log.zahaj_kolo()
+    log.sekvence_prehrana()
+    log.zpracuj_vstup(log.sekvence[0])
+    v2 = log.zpracuj_vstup(log.sekvence[1])
+    assert v2.kolo_dokonceno and v2.uspech
+    assert v2.odmena_dosažena
+
+
+def test_absolutni_sluch_ztezeni():
+    log = vytvor(absolutni_sluch=True, interval_statistik=1, delka_sekvence=4, pocet_pokusu=3)
+    delka_pred = log.nastaveni.delka_sekvence
+    pokusy_pred = log.nastaveni.pocet_pokusu
+
+    log.zahaj_kolo()
+    log.sekvence_prehrana()
+    for s in log.sekvence:
+        v = log.zpracuj_vstup(s)
+
+    assert v.kolo_dokonceno and v.uspech
+    assert v.ztezena_hra
+    assert log.nastaveni.delka_sekvence > delka_pred
+    assert log.nastaveni.pocet_pokusu < pokusy_pred
+
+
+def test_neplatne_nove_parametry_nastaveni():
+    with pytest.raises(ValueError):
+        NastaveniHry(odmena_po_kolech=0).over()
+    with pytest.raises(ValueError):
+        NastaveniHry(absolutni_sluch="neplatne").over()

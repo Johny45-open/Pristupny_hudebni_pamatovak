@@ -707,6 +707,11 @@ class HlavniOkno(QMainWindow):
         if vysledek.kolo_dokonceno and vysledek.uspech:
             if vysledek.interval is not None:
                 self._ceka_dialog = vysledek.interval
+            if vysledek.ztezena_hra:
+                self.nastaveni = self.logika.nastaveni
+                uloziste.uloz_nastaveni(self.nastaveni)
+                self._aktualizuj_info()
+                self._aktualizovat_dostupnost()
             self._oznam(
                 f"{vysledek.hlaska} "
                 f"Sekvence zopakována správně, vyhráváte.")

@@ -65,6 +65,8 @@ class VysledekVstupu:
     uspech: bool | None             # výsledek kola, jen pokud kolo_dokonceno
     hlaska: str
     interval: VysledekIntervalu | None = None   # snímek pro dialog statistik
+    odmena_dosažena: bool = False
+    ztezena_hra: bool = False
 
 
 @dataclass
@@ -76,6 +78,9 @@ class NastaveniHry:
     delka_sekvence: int = 4
     pocet_pokusu: int = 3
     interval_statistik: int = 5
+    odmena_po_kolech: int = 5
+    absolutni_sluch: bool = False
+    expertnimode: bool = False
     id_smutne_melodie: str = "kratka_sestupna"
     id_vitezne_melodie: str = "kratka_fanfara"
 
@@ -91,6 +96,16 @@ class NastaveniHry:
                 f"Počet pokusů musí být 1–10, je {self.pocet_pokusu}")
         if self.interval_statistik < 1:
             raise ValueError("Interval statistik musí být kladné celé číslo")
+        if self.odmena_po_kolech < 1:
+            raise ValueError("Odměna po úspěšných kolech musí být kladné celé číslo")
+        if not isinstance(self.absolutni_sluch, bool):
+            raise ValueError("Absolutní sluch musí být pravdivostní hodnota")
+
+    def zmenit_na_expert(self) -> None:
+        """Nastaví expertní mód: ztíží parametry hry."""
+        self.expertnimode = True
+        self.delka_sekvence = min(12, self.delka_sekvence + 2)
+        self.pocet_pokusu = max(1, self.pocet_pokusu - 1)
 
 
 class HerniLogika:
@@ -114,6 +129,8 @@ class HerniLogika:
         self.pokusy_zbyva: int = 0
         self.pokusy_celkem: int = 0
         self.kolo_cislo: int = 0           # dokončená kola v této hře
+        self.aktualni_streak: int = 0      # počet po sobě jdoucích úspěšných kol
+        self.aktualni_streak: int = 0      # počet po sobě jdoucích úspěšných kol
 
     # ------------------------------------------------------------------
     # Nastavení a nová hra
@@ -138,6 +155,7 @@ class HerniLogika:
         self.pokusy_zbyva = 0
         self.pokusy_celkem = 0
         self.kolo_cislo = 0
+        self.aktualni_streak = 0
 
     # ------------------------------------------------------------------
     # Kolo
@@ -222,14 +240,30 @@ class HerniLogika:
                 # Úspěšné dokončení celé sekvence.
                 self.stav = StavKola.DOKONCENO_USPECH
                 self.kolo_cislo += 1
+                self.aktualni_streak += 1
+                odmena = (self.aktualni_streak > 0 and self.aktualni_streak % self.nastaveni.odmena_po_kolech == 0)
                 interval = self.spravce.kolo_dokonceno(uspech=True)
+                ztezena = False
+                if interval is not None and self.nastaveni.absolutni_sluch:
+                    if interval.interval.neuspesna_kola == 0:
+                        self.nastaveni.zmenit_na_expert()
+                        ztezena = True
+
+                casti_hlasky = ["Gratuluji, sekvence je správně zopakovaná."]
+                if odmena:
+                    casti_hlasky.append(f"Získáváte odměnu za {self.aktualni_streak} úspěšných kol v řadě!")
+                if ztezena:
+                    casti_hlasky.append(f"Máte absolutní hudební sluch a zvládli jste všechna kola — hra se stává těžší (délka sekvence: {self.nastaveni.delka_sekvence}, pokusy: {self.nastaveni.pocet_pokusu}).")
+
                 return VysledekVstupu(
                     prijat=True, spravne=True,
                     ocekavany_stupen=ocekavany, zadany_stupen=stupen,
                     pokusy_zbyva=self.pokusy_zbyva, pozice=self.pozice,
                     delka=delka, kolo_dokonceno=True, uspech=True,
-                    hlaska="Gratuluji, sekvence je správně zopakovaná.",
+                    hlaska=" ".join(casti_hlasky),
                     interval=interval,
+                    odmena_dosažena=odmena,
+                    ztezena_hra=ztezena,
                 )
             zbyva = delka - self.pozice
             return VysledekVstupu(
@@ -246,6 +280,7 @@ class HerniLogika:
         if self.pokusy_zbyva <= 0:
             self.stav = StavKola.DOKONCENO_NEUSPECH
             self.kolo_cislo += 1
+            self.aktualni_streak = 0
             interval = self.spravce.kolo_dokonceno(uspech=False)
             return VysledekVstupu(
                 prijat=True, spravne=False, ocekavany_stupen=ocekavany,
