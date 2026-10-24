@@ -204,10 +204,12 @@ def nazev_pro_tlacitko(tonina: str, stupen: int, oktava: int) -> tuple[str, int]
     return f"Tón {nazev}, oktáva {okt}", midi
 
 
-def akord_stupne(tonina: str, stupen: int, oktava: int = 4) -> list[int]:
-    """Vrátí seznam MIDI tónů (trojzvuk) pro daný stupeň tóniny (0-6)."""
+def akord_stupne(tonina: str, stupen: int, oktava: int = 4, obrat: int = 0) -> list[int]:
+    """Vrátí seznam MIDI tónů (trojzvuk v obratu 0-2) pro daný stupeň tóniny (0-6)."""
     if not 0 <= stupen <= 6:
         raise ValueError(f"Stupeň musí být 0-6, dostal jsem {stupen}")
+    if not 0 <= obrat <= 2:
+        raise ValueError(f"Obrat musí být 0-2, dostal jsem {obrat}")
     s = stupnice(tonina, oktava)
     _, m0 = s[stupen]
     _, m2 = s[(stupen + 2) % 7]
@@ -215,7 +217,12 @@ def akord_stupne(tonina: str, stupen: int, oktava: int = 4) -> list[int]:
     t1 = m0
     t2 = m2 if m2 > t1 else m2 + 12
     t3 = m4 if m4 > t2 else m4 + 12
-    return [t1, t2, t3]
+    akord = [t1, t2, t3]
+    if obrat == 1:
+        akord = [akord[1], akord[2], akord[0] + 12]
+    elif obrat == 2:
+        akord = [akord[2], akord[0] + 12, akord[1] + 12]
+    return akord
 
 
 def nazev_akordu_stupne(tonina: str, stupen: int) -> str:
@@ -241,3 +248,12 @@ def nazev_akordu_stupne(tonina: str, stupen: int) -> str:
         kvalita = ""
 
     return f"{zaklad_nazev} {kvalita}".strip()
+
+
+def popis_akordu_detail(tonina: str, stupen: int, oktava: int = 4, obrat: int = 0) -> str:
+    """Vrátí detailní popis akordu včetně obratu a konkrétních tónů pro vývojářský režim."""
+    nazev = nazev_akordu_stupne(tonina, stupen)
+    midi_list = akord_stupne(tonina, stupen, oktava, obrat)
+    obrat_nazvy = {0: "základní tvar", 1: "1. obrat", 2: "2. obrat"}
+    tony_str = ", ".join(nazev_tonu_z_midi(m, tonina) for m in midi_list)
+    return f"{nazev} ({obrat_nazvy[obrat]}): [{tony_str}]"

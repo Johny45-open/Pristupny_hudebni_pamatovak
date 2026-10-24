@@ -84,6 +84,7 @@ class NastaveniHry:
     id_smutne_melodie: str = "kratka_sestupna"
     id_vitezne_melodie: str = "kratka_fanfara"
     rezim: str = "tony"   # "tony" nebo "akordy"
+    vyvojarsky_rezim: bool = False
 
     def over(self) -> None:
         theory.over_toninu(self.tonina)
@@ -103,6 +104,8 @@ class NastaveniHry:
             raise ValueError("Absolutní sluch musí být pravdivostní hodnota")
         if self.rezim not in ("tony", "akordy"):
             raise ValueError(f"Neplatný režim hry: {self.rezim!r}")
+        if not isinstance(self.vyvojarsky_rezim, bool):
+            raise ValueError("Vývojářský režim musí být pravdivostní hodnota")
 
     def zmenit_na_expert(self) -> None:
         """Nastaví expertní mód: ztíží parametry hry."""
@@ -128,16 +131,12 @@ class HerniLogika:
 
         self.stav: StavKola = StavKola.CEKA_NA_PREHRANI
         self.sekvence: list[int] = []      # stupně 0-6
+        self.obraty: list[int] = []        # obraty 0-2 pro akordy
         self.pozice: int = 0               # kolikátý tón hráč právě opakuje
         self.pokusy_zbyva: int = 0
         self.pokusy_celkem: int = 0
         self.kolo_cislo: int = 0           # dokončená kola v této hře
         self.aktualni_streak: int = 0      # počet po sobě jdoucích úspěšných kol
-        self.aktualni_streak: int = 0      # počet po sobě jdoucích úspěšných kol
-
-    # ------------------------------------------------------------------
-    # Nastavení a nová hra
-    # ------------------------------------------------------------------
 
     def zmenit_nastaveni(self, **zmeny) -> None:
         """Aplikuje nastavení pro DALŠÍ kola (současné kolo neovlivní)."""
@@ -154,15 +153,12 @@ class HerniLogika:
         """
         self.stav = StavKola.CEKA_NA_PREHRANI
         self.sekvence = []
+        self.obraty = []
         self.pozice = 0
         self.pokusy_zbyva = 0
         self.pokusy_celkem = 0
         self.kolo_cislo = 0
         self.aktualni_streak = 0
-
-    # ------------------------------------------------------------------
-    # Kolo
-    # ------------------------------------------------------------------
 
     def zahaj_kolo(self) -> list[int]:
         """Vygeneruje novou náhodnou sekvenci a připraví kolo.
@@ -172,6 +168,7 @@ class HerniLogika:
         """
         n = self.nastaveni.delka_sekvence
         self.sekvence = [self.rng.randrange(7) for _ in range(n)]
+        self.obraty = [self.rng.randrange(3) for _ in range(n)] if self.nastaveni.rezim == "akordy" else [0] * n
         self.pozice = 0
         self.pokusy_celkem = self.nastaveni.pocet_pokusu
         self.pokusy_zbyva = self.pokusy_celkem
@@ -190,14 +187,28 @@ class HerniLogika:
         return True
 
     def midi_sekvence(self) -> list[int] | list[tuple[int, ...]]:
-        """Sekvence převedená na MIDI výšky nebo akordy podle tóniny a oktávy."""
+        """Sekvence převedená na MIDI výšky nebo akordy podle tóniny a oktávy a obratů."""
         if self.nastaveni.rezim == "akordy":
             return [
-                tuple(theory.akord_stupne(self.nastaveni.tonina, s, self.nastaveni.oktava))
-                for s in self.sekvence
+                tuple(theory.akord_stupne(self.nastaveni.tonina, s, self.nastaveni.oktava, obrat=o))
+                for s, o in zip(self.sekvence, self.obraty)
             ]
         stup = theory.stupnice(self.nastaveni.tonina, self.nastaveni.oktava)
         return [stup[s][1] for s in self.sekvence]
+
+    def vyvojarsky_prehled_sekvence(self) -> list[str]:
+        """Vrátí detailní popis sekvence pro vývojářský režim."""
+        if not getattr(self.nastaveni, "vyvojarsky_rezim", False):
+            return []
+        if self.nastaveni.rezim != "akordy":
+            return [
+                theory.nazev_pro_tlacitko(self.nastaveni.tonina, s, self.nastaveni.oktava)[0]
+                for s in self.sekvence
+            ]
+        return [
+            theory.popis_akordu_detail(self.nastaveni.tonina, s, self.nastaveni.oktava, o)
+            for s, o in zip(self.sekvence, self.obraty)
+        ]
 
     def tlacitka(self) -> list[tuple[str, int]]:
         """Sedm tlačítek: [(přístupný název, MIDI), ...]."""

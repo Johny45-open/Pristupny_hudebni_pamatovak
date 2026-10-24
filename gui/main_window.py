@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -282,6 +283,29 @@ class HlavniOkno(QMainWindow):
         pridat("přehrát znovu", "F5", self._prehraj_sekvenci_znovu)
         pridat("zopakovat hlášení", "F6", self._zopakuj_hlaseni)
         pridat("pokračovat ve hře", "F7", self._pokracovat_ve_hre)
+        pridat("vývojářský režim", "Ctrl+Alt+D", self._prepinac_vyvojarskeho_rezimu)
+
+    def _prepinac_vyvojarskeho_rezimu(self) -> None:
+        if QApplication.activeModalWidget() is not None:
+            return
+        if self.nastaveni.vyvojarsky_rezim:
+            self.nastaveni.vyvojarsky_rezim = False
+            self.logika.zmenit_nastaveni(vyvojarsky_rezim=False)
+            self._aktualizuj_info()
+            self._oznam("Vývojářský režim byl uzamčen.")
+        else:
+            heslo, ok = QInputDialog.getText(
+                self, "Vývojářský režim", "Zadejte heslo pro vývojářský režim:",
+                QLineEdit.EchoMode.Password
+            )
+            if ok:
+                if heslo == "hudba":
+                    self.nastaveni.vyvojarsky_rezim = True
+                    self.logika.zmenit_nastaveni(vyvojarsky_rezim=True)
+                    self._aktualizuj_info()
+                    self._oznam("Vývojářský režim úspěšně odemčen.")
+                else:
+                    self._oznam("Nesprávné heslo. Vývojářský režim zůstává uzamčen.")
 
     def _kontext_klavesy_povolen(self) -> bool:
         """Klávesy 1–7 jen ve hře: není modální dialog a fokus není v poli."""
@@ -324,6 +348,10 @@ class HlavniOkno(QMainWindow):
             f"pokusy {n.pocet_pokusu}.",
             self.logika.popis_stavu(),
         ]
+        if n.vyvojarsky_rezim and self.logika.sekvence:
+            prehled = self.logika.vyvojarsky_prehled_sekvence()
+            if prehled:
+                radky.append(f"[Vývojářský přehled: {' → '.join(prehled)}]")
         if self.motor.tichy_rezim:
             radky.append(self.motor.popis_rezimu())
         self._label_info.setText("\n".join(radky))
