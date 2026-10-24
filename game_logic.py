@@ -83,6 +83,7 @@ class NastaveniHry:
     expertnimode: bool = False
     id_smutne_melodie: str = "kratka_sestupna"
     id_vitezne_melodie: str = "kratka_fanfara"
+    rezim: str = "tony"   # "tony" nebo "akordy"
 
     def over(self) -> None:
         theory.over_toninu(self.tonina)
@@ -100,6 +101,8 @@ class NastaveniHry:
             raise ValueError("Odměna po úspěšných kolech musí být kladné celé číslo")
         if not isinstance(self.absolutni_sluch, bool):
             raise ValueError("Absolutní sluch musí být pravdivostní hodnota")
+        if self.rezim not in ("tony", "akordy"):
+            raise ValueError(f"Neplatný režim hry: {self.rezim!r}")
 
     def zmenit_na_expert(self) -> None:
         """Nastaví expertní mód: ztíží parametry hry."""
@@ -186,13 +189,26 @@ class HerniLogika:
         self.stav = StavKola.HRAC_VSTUPUJE
         return True
 
-    def midi_sekvence(self) -> list[int]:
-        """Sekvence převedená na MIDI výšky podle tóniny a oktávy."""
+    def midi_sekvence(self) -> list[int] | list[tuple[int, ...]]:
+        """Sekvence převedená na MIDI výšky nebo akordy podle tóniny a oktávy."""
+        if self.nastaveni.rezim == "akordy":
+            return [
+                tuple(theory.akord_stupne(self.nastaveni.tonina, s, self.nastaveni.oktava))
+                for s in self.sekvence
+            ]
         stup = theory.stupnice(self.nastaveni.tonina, self.nastaveni.oktava)
         return [stup[s][1] for s in self.sekvence]
 
     def tlacitka(self) -> list[tuple[str, int]]:
         """Sedm tlačítek: [(přístupný název, MIDI), ...]."""
+        if self.nastaveni.rezim == "akordy":
+            rez = []
+            for s in range(7):
+                nazev_akordu = theory.nazev_akordu_stupne(self.nastaveni.tonina, s)
+                stup = theory.stupnice(self.nastaveni.tonina, self.nastaveni.oktava)
+                _, midi_koorene = stup[s]
+                rez.append((f"Akord {nazev_akordu}", midi_koorene))
+            return rez
         return [
             theory.nazev_pro_tlacitko(
                 self.nastaveni.tonina, s, self.nastaveni.oktava)
@@ -200,12 +216,19 @@ class HerniLogika:
         ]
 
     def ocekavany_ton(self) -> tuple[str, int] | None:
-        """(název, MIDI) tónu, který hráč právě má zopakovat."""
+        """(název, MIDI) tónu nebo akordu, který hráč právě má zopakovat."""
         if self.stav != StavKola.HRAC_VSTUPUJE:
             return None
-        stup = theory.stupnice(self.nastaveni.tonina, self.nastaveni.oktava)
-        nazev, midi = stup[self.sekvence[self.pozice]]
-        return f"{nazev}{midi // 12 - 1}", midi
+        stupen = self.sekvence[self.pozice]
+        if self.nastaveni.rezim == "akordy":
+            nazev_akordu = theory.nazev_akordu_stupne(self.nastaveni.tonina, stupen)
+            stup = theory.stupnice(self.nastaveni.tonina, self.nastaveni.oktava)
+            _, midi = stup[stupen]
+            return f"Akord {nazev_akordu}", midi
+        else:
+            stup = theory.stupnice(self.nastaveni.tonina, self.nastaveni.oktava)
+            nazev, midi = stup[stupen]
+            return f"{nazev}{midi // 12 - 1}", midi
 
     # ------------------------------------------------------------------
     # Vstup hráče

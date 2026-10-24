@@ -75,6 +75,7 @@ def uloz_nastaveni(nastaveni: NastaveniHry,
     s.setValue("absolutni_sluch", nastaveni.absolutni_sluch)
     s.setValue("id_smutne_melodie", nastaveni.id_smutne_melodie)
     s.setValue("id_vitezne_melodie", nastaveni.id_vitezne_melodie)
+    s.setValue("rezim", nastaveni.rezim)
     s.sync()
 
 
@@ -113,6 +114,7 @@ def nacti_nastaveni(nastaveni_qsettings: QSettings | None = None) -> NastaveniHr
                                       vychozi.id_smutne_melodie)),
         id_vitezne_melodie=str(s.value("id_vitezne_melodie",
                                        vychozi.id_vitezne_melodie)),
+        rezim=str(s.value("rezim", vychozi.rezim)),
     )
     try:
         kandidat.over()

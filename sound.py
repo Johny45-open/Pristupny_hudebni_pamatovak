@@ -64,6 +64,48 @@ def generuj_vlnu(
     return stereo
 
 
+def generuj_akord(
+    midi_seznam: list[int] | tuple[int, ...],
+    zvuk_s: float,
+    hlasitost: float = 0.45,
+    vzorkovaci: int = VZORKOVACI_FREKVENCE,
+) -> np.ndarray:
+    """Vygeneruje stereo int16 signál akordu (součet tónů)."""
+    if not midi_seznam:
+        raise ValueError("Seznam MIDI tónů pro akord nesmí být prázdný")
+    if zvuk_s <= 0:
+        raise ValueError(f"Délka tónu musí být kladná: {zvuk_s}")
+    n = _pocet_vzorku(zvuk_s, vzorkovaci)
+    t = np.arange(n, dtype=np.float64) / vzorkovaci
+
+    signal = np.zeros(n, dtype=np.float64)
+    for midi in midi_seznam:
+        f = frekvence_pro_midi(midi)
+        ton_signal = np.zeros(n, dtype=np.float64)
+        for harm, amplituda in ((1, 1.0), (2, 0.35), (3, 0.18), (4, 0.08)):
+            ton_signal += amplituda * np.sin(2.0 * math.pi * f * harm * t)
+        ton_signal /= 1.61
+        signal += ton_signal
+
+    signal /= len(midi_seznam)
+
+    obalka = np.ones(n, dtype=np.float64)
+    nabeh = min(int(0.010 * vzorkovaci), n)
+    if nabeh > 1:
+        obalka[:nabeh] = np.linspace(0.0, 1.0, nabeh)
+    dozvuk = min(int(0.15 * n), n)
+    if dozvuk > 1:
+        obalka[n - dozvuk:] *= np.linspace(1.0, 0.0, dozvuk)
+
+    signal *= obalka * hlasitost
+    signal = np.clip(signal, -1.0, 1.0)
+    stereo = np.empty((n, 2), dtype=np.int16)
+    pcm = (signal * 32767.0).astype(np.int16)
+    stereo[:, 0] = pcm
+    stereo[:, 1] = pcm
+    return stereo
+
+
 def _pocet_vzorku(zvuk_s: float, vzorkovaci: int) -> int:
     return max(1, int(round(zvuk_s * vzorkovaci)))
 
@@ -147,6 +189,17 @@ class ZvukovyMotor:
         zvuk = self._cache.get(klic)
         if zvuk is None:
             zvuk = self._pygame.sndarray.make_sound(generuj_vlnu(midi, zvuk_s))
+            self._cache[klic] = zvuk
+        return zvuk
+
+    def vytvor_akord(self, midi_seznam: tuple[int, ...] | list[int], zvuk_s: float):
+        """Vrátí přehrátelný objekt zvuku akordu, nebo None v tichém režimu."""
+        if not self.dostupny:
+            return None
+        klic = (tuple(midi_seznam), round(zvuk_s, 3))
+        zvuk = self._cache.get(klic)
+        if zvuk is None:
+            zvuk = self._pygame.sndarray.make_sound(generuj_akord(midi_seznam, zvuk_s))
             self._cache[klic] = zvuk
         return zvuk
 

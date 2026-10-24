@@ -138,6 +138,18 @@ class NastaveniDialog(QDialog):
             "Pokud je zapnuto a zvládnete všechna kola v intervalu bez chyb, hra se stane těžší.")
         form.addRow("", self.absolutni_sluch)
 
+        # --- Herní režim -------------------------------------------------
+        self.rezim = QComboBox(self)
+        self.rezim.addItem("Tóny / Melodie", "tony")
+        self.rezim.addItem("Akordy", "akordy")
+        self.rezim.setCurrentIndex(0 if getattr(nastaveni, "rezim", "tony") == "tony" else 1)
+        self.rezim.setAccessibleName("Herní režim")
+        self.rezim.setAccessibleDescription(
+            "Režim hry: buď hádání jednotlivých tónů, nebo hádání akordů.")
+        pop_rezim = QLabel("Herní režim:", self)
+        pop_rezim.setBuddy(self.rezim)
+        form.addRow(pop_rezim, self.rezim)
+
         # --- Smutná melodie ---------------------------------------------
         self.smutna = QComboBox(self)
         self.smutna.setAccessibleName("Smutná melodie")
@@ -372,6 +384,7 @@ class NastaveniDialog(QDialog):
             "absolutni_sluch": bool(self.absolutni_sluch.isChecked()),
             "id_smutne_melodie": self.smutna.currentData(),
             "id_vitezne_melodie": self.vitezna.currentData(),
+            "rezim": self.rezim.currentData(),
         }
         # Kontrola rozsahů (i když spinboxy je hlídají).
         if not 2 <= hodnoty["delka_sekvence"] <= 12:

@@ -202,3 +202,42 @@ def nazev_pro_tlacitko(tonina: str, stupen: int, oktava: int) -> tuple[str, int]
     nazev, midi = stupnice(tonina, oktava)[stupen]
     okt = _oktava_pro_nazev(nazev, midi)
     return f"Tón {nazev}, oktáva {okt}", midi
+
+
+def akord_stupne(tonina: str, stupen: int, oktava: int = 4) -> list[int]:
+    """Vrátí seznam MIDI tónů (trojzvuk) pro daný stupeň tóniny (0-6)."""
+    if not 0 <= stupen <= 6:
+        raise ValueError(f"Stupeň musí být 0-6, dostal jsem {stupen}")
+    s = stupnice(tonina, oktava)
+    _, m0 = s[stupen]
+    _, m2 = s[(stupen + 2) % 7]
+    _, m4 = s[(stupen + 4) % 7]
+    t1 = m0
+    t2 = m2 if m2 > t1 else m2 + 12
+    t3 = m4 if m4 > t2 else m4 + 12
+    return [t1, t2, t3]
+
+
+def nazev_akordu_stupne(tonina: str, stupen: int) -> str:
+    """Vrátí český název akordu pro daný stupeň tóniny (např. 'C dur', 'D mol', 'H zmenšený')."""
+    if not 0 <= stupen <= 6:
+        raise ValueError(f"Stupeň musí být 0-6, dostal jsem {stupen}")
+    s = stupnice(tonina, oktava=4)
+    akor_midi = akord_stupne(tonina, stupen, oktava=4)
+    zaklad_nazev, _ = s[stupen]
+
+    p1 = (akor_midi[1] - akor_midi[0]) % 12
+    p2 = (akor_midi[2] - akor_midi[0]) % 12
+
+    if p1 == 4 and p2 == 7:
+        kvalita = "dur"
+    elif p1 == 3 and p2 == 7:
+        kvalita = "mol"
+    elif p1 == 3 and p2 == 6:
+        kvalita = "zmenšený"
+    elif p1 == 4 and p2 == 8:
+        kvalita = "zvětšený"
+    else:
+        kvalita = ""
+
+    return f"{zaklad_nazev} {kvalita}".strip()

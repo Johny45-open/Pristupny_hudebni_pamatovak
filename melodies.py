@@ -636,7 +636,7 @@ def ziskej_melodii(tonina: str, druh: str, id_melodie: str | None = None) -> Vol
 
 @dataclass(frozen=True)
 class KrokPrehravani:
-    """Jeden krok přehrávání: MIDI výška + doby v sekundách.
+    """Jeden krok přehrávání: MIDI výška (nebo seznam pro akord) + doby v sekundách.
 
     ``impuls=True`` znamená krátký rytmický klep místo tónu
     (používá jen průvodce rytmem; běžné melodie mají False,
@@ -647,6 +647,7 @@ class KrokPrehravani:
     zvuk_s: float
     pauza_s: float
     impuls: bool = False
+    midi_seznam: tuple[int, ...] | None = None
 
 
 def casovy_plan(melodie: Melodie) -> list[KrokPrehravani]:

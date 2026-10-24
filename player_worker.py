@@ -91,6 +91,8 @@ class Prehravac(QThread):
                 # rytmem); běžné tóny jdou stejnou cestou jako dřív.
                 if krok.impuls:
                     zvuk = self._motor.vytvor_impuls(krok.zvuk_s)
+                elif krok.midi_seznam:
+                    zvuk = self._motor.vytvor_akord(krok.midi_seznam, krok.zvuk_s)
                 else:
                     zvuk = self._motor.vytvor_zvuk(krok.midi, krok.zvuk_s)
                 kanal = self._motor.prehraj(zvuk)

@@ -554,6 +554,12 @@ class HlavniOkno(QMainWindow):
     # ==================================================================
 
     def _kroky_sekvence(self) -> list[KrokPrehravani]:
+        if self.logika.nastaveni.rezim == "akordy":
+            return [
+                KrokPrehravani(midi=midi_seznam[0], zvuk_s=DELKA_TONU_SEKVENCE_S,
+                               pauza_s=PAUZA_V_SEKVENCE_S, midi_seznam=midi_seznam)
+                for midi_seznam in self.logika.midi_sekvence()
+            ]
         return [
             KrokPrehravani(midi=midi, zvuk_s=DELKA_TONU_SEKVENCE_S,
                            pauza_s=PAUZA_V_SEKVENCE_S)
@@ -727,12 +733,17 @@ class HlavniOkno(QMainWindow):
             self._spust_ulohu("smutna", self._kroky_melodie(melodies.DRUH_SMUTNA),
                               "smutná melodie", fokus_po="nova_hra")
         elif vysledek.spravne:
-            # Potvrzení správného tónu — přehraje se samotný tón.
+            # Potvrzení správného tónu nebo akordu — přehraje se samotný tón/akord.
             self._oznam(vysledek.hlaska)
-            midi = self.logika.midi_sekvence()[vysledek.pozice - 1]
+            if self.logika.nastaveni.rezim == "akordy":
+                midi_seznam = tuple(theory.akord_stupne(self.logika.nastaveni.tonina, self.logika.sekvence[vysledek.pozice - 1], self.logika.nastaveni.oktava))
+                krok = KrokPrehravani(midi=midi_seznam[0], zvuk_s=DELKA_TONU_S, pauza_s=0.0, midi_seznam=midi_seznam)
+            else:
+                midi = self.logika.midi_sekvence()[vysledek.pozice - 1]
+                krok = KrokPrehravani(midi=midi, zvuk_s=DELKA_TONU_S, pauza_s=0.0)
             self._spust_ulohu(
                 "ton",
-                [KrokPrehravani(midi=midi, zvuk_s=DELKA_TONU_S, pauza_s=0.0)],
+                [krok],
                 "potvrzení tónu", fokus_po="zachovat")
         else:
             # Chyba se zbývajícími pokusy — smutná melodie + restart sekvence.
